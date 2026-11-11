@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#121016">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Lethal Menu Remote</title>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Small shims so the Firebase SDK also runs on older tablet browsers (Android 4.4/5 Chrome).
+    if (!String.prototype.replaceAll) {
+      String.prototype.replaceAll = function (search, replacement) {
+        if (search instanceof RegExp) { return this.replace(search, replacement); }
+        return this.split(String(search)).join(replacement);
+      };
+    }
+    if (!Array.prototype.at) {
+      Array.prototype.at = function (i) { i = Math.trunc(i) || 0; if (i < 0) { i += this.length; } return this[i]; };
+    }
+    if (!Object.hasOwn) {
+      Object.hasOwn = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
+    }
+    if (typeof globalThis === "undefined") { window.globalThis = window; }
+  </script>
+  <script nomodule>
+    document.addEventListener("DOMContentLoaded", function () {
+      document.getElementById("boot").textContent = "This browser is too old to run the panel. Update Chrome (Play Store) and try again.";
+    });
+  </script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div id="boot" class="boot">Loading...</div>
+
+  <!-- Sign in -->
+  <section id="view-login" class="view hidden">
+    <div class="card login">
+      <h1>Lethal Menu <span class="accent">Remote</span></h1>
+      <p class="muted">Sign in to control your menu.</p>
+      <form id="login-form" autocomplete="on">
+        <label class="field">Email<input id="login-email" type="email" autocomplete="username" required></label>
+        <label class="field">Password<input id="login-password" type="password" autocomplete="current-password" minlength="6" required></label>
+        <button class="btn primary wide" type="submit">Sign in</button>
+        <button class="btn wide" type="button" id="btn-create">Create account</button>
+      </form>
+      <div class="divider"><span>or</span></div>
+      <button class="btn wide" id="btn-google" type="button">Sign in with Google</button>
+      <p id="login-error" class="error"></p>
+    </div>
+  </section>
+
+  <!-- First sign-in: claim ownership -->
+  <section id="view-claim" class="view hidden">
+    <div class="card login">
+      <h1>Claim this panel</h1>
+      <p class="muted">No one owns this panel yet. Claiming it makes <b id="claim-email"></b> the only account that can control your menu. This can only be done once.</p>
+      <button class="btn primary wide" id="btn-claim" type="button">Claim panel</button>
+      <button class="btn wide" data-action="signout" type="button">Sign out</button>
+      <p id="claim-error" class="error"></p>
+    </div>
+  </section>
+
+  <!-- Signed in with the wrong account -->
+  <section id="view-denied" class="view hidden">
+    <div class="card login">
+      <h1>Not authorized</h1>
+      <p class="muted">This panel belongs to another account.</p>
+      <button class="btn wide" data-action="signout" type="button">Sign out</button>
+    </div>
+  </section>
+
+  <!-- Main panel -->
+  <section id="view-app" class="view hidden">
+    <header class="topbar">
+      <div class="brand">Lethal Menu <span class="accent">Remote</span></div>
+      <div class="device-picker">
+        <span id="device-dot" class="dot"></span>
+        <select id="device-select" aria-label="Device"></select>
+      </div>
+      <button class="btn small" data-action="signout" type="button">Sign out</button>
+    </header>
+
+    <div id="pending" class="pending hidden"></div>
+
+    <div id="no-device" class="card empty hidden">
+      <h2>No PC connected yet</h2>
+      <ol class="muted steps">
+        <li>Fill <code>apiKey</code> and <code>databaseUrl</code> in <code>lethalmenu.remote.json</code> in the game folder.</li>
+        <li>In the game: <b>Settings &gt; Remote Panel &gt; Enable</b>.</li>
+        <li>A pairing code appears in the menu and here. Approve it.</li>
+      </ol>
+    </div>
+
+    <div id="device-view" class="hidden">
+      <div id="game-strip" class="strip"></div>
+
+      <nav class="tabs" id="tabs"></nav>
+
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Search features..." aria-label="Search">
+        <div class="toolbar-actions">
+          <button class="btn small" id="btn-menu" type="button">Open menu in game</button>
+          <button class="btn small danger" id="btn-eject" type="button">Eject</button>
+        </div>
+      </div>
+
+      <div id="offline-note" class="note hidden">This PC is offline. Commands will be ignored until the game is running with the menu loaded.</div>
+
+      <main id="content"></main>
+
+      <footer class="footer">
+        <span id="device-meta" class="muted"></span>
+        <button class="btn small danger-outline" id="btn-remove-device" type="button">Remove this PC</button>
+      </footer>
+    </div>
+  </section>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>

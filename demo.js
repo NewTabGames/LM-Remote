@@ -11,7 +11,7 @@ export var demo = {
     hacks: {
       GodMode: t("God Mode", "Self"), GhostMode: t("Ghost Mode", "Self"), SuperJump: t("Super Jump", "Self"),
       SuperSpeed: t("Super Speed", "Self"), NoClip: t("No Clip", "Self"), UnlimitedStamina: t("Unlimited Stamina", "Self"),
-      NightVision: t("Night Vision", "Self"), FreeCam: t("Free Cam", "Self"), DropAllItems: a("Drop All Items", "Self"),
+      NightVision: t("Night Vision", "Visuals"), FreeCam: t("Free Cam", "Self"), DropAllItems: a("Drop All Items", "Self"),
       TeleportShip: a("Teleport Ship", "Self"), SellQuota: a("Sell Quota", "Self"),
       Teleport: a("Teleport", "Self", [{ name: "Pos", kind: "vector3" }, { name: "Elevator", kind: "bool" }, { name: "Ship", kind: "bool" }, { name: "Factory", kind: "bool" }]),
       Experience: a("Experience", "Self", [{ name: "Amount", kind: "number", integer: true }, { name: "Type", kind: "enum", options: ["Add", "Remove", "Set"] }]),
@@ -37,13 +37,14 @@ export var demo = {
   },
   state: {
     menuOpen: false,
-    toggles: { GodMode: true, NightVision: true, PlayerESP: true, EnemyESP: true, SpectatePlayer: false, MiniCam: false, DemiGod: false },
+    toggles: { GodMode: true, NightVision: true, PlayerESP: true, EnemyESP: true, SpectatePlayer: false, MiniCam: true, DemiGod: true },
+    targets: { spectating: -1, miniCam: 1, demiGod: [1], controlling: "Hoarding bug", controlTarget: 1, aiDriving: false },
     settings: { f_movementSpeed: 4.6, f_jumpForce: 15.2, f_fov: 90, i_menuFontSize: 14, b_FPSCounter: false, b_NoFog: true },
     game: { inRound: true, landed: true, inShipPhase: false, moon: "41 Experimentation", isHost: true, credits: 360, quota: 130, fulfilled: 84, daysLeft: 2, localName: "You", alive: true, health: 100, position: [12.5, -219.3, 64.1] },
     players: [
-      { id: 0, name: "You", dead: false, health: 100, local: true, inside: true },
-      { id: 1, name: "Friend", dead: false, health: 45, local: false, inside: true },
-      { id: 2, name: "Other", dead: true, health: 0, local: false, inside: false }
+      { id: 0, clientId: 0, name: "You", dead: false, health: 100, local: true, inside: true },
+      { id: 1, clientId: 1, name: "Friend", dead: false, health: 45, local: false, inside: true },
+      { id: 2, clientId: 2, name: "Other", dead: true, health: 0, local: false, inside: false }
     ],
     enemies: [
       { id: 101, name: "Hoarding bug", dead: false, inside: true, distance: 14 },
@@ -52,3 +53,16 @@ export var demo = {
     ]
   }
 };
+
+// Sample sections (the real ones come from the game, matching the in-game menu).
+var sampleGroups = {
+  GodMode: "Survival", GhostMode: "Survival",
+  SuperJump: "Movement", SuperSpeed: "Movement", NoClip: "Movement", UnlimitedStamina: "Movement", FreeCam: "Movement", Teleport: "Movement", TeleportShip: "Movement",
+  DropAllItems: "Items & Inventory", SellQuota: "Items & Inventory", Experience: "Items & Inventory",
+  PlayerESP: "People & Creatures", EnemyESP: "People & Creatures", ObjectESP: "Loot", FOV: "Camera & Screen", NoVisor: "Camera & Screen", NightVision: "Camera & Screen"
+};
+var sampleOrder = 0;
+Object.keys(sampleGroups).forEach(function (key) {
+  var h = demo.catalog.hacks[key];
+  if (h) { h.group = sampleGroups[key]; h.order = sampleOrder++; }
+});

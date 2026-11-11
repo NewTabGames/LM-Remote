@@ -157,6 +157,10 @@ input:focus, select:focus { border-color: var(--accent); }
 .entity-actions { display: flex; flex-wrap: wrap; }
 .entity-actions .btn { margin: 0 4px 4px 0; }
 .empty-list { color: var(--muted); padding: 6px 0; }
+.running-bar { display: flex; flex-wrap: wrap; align-items: center; margin: 4px 12px 0; background: var(--panel); border: 1px solid var(--accent); padding: 6px 10px; }
+.running-label { color: var(--muted); font-size: 13px; margin-right: 8px; }
+.running-bar .btn, .running-bar select { margin: 2px 6px 2px 0; }
+.running-bar select { min-height: 38px; font-size: 14px; }
 
 .setting-input { width: 120px; text-align: right; }
 

@@ -273,6 +273,9 @@ function selectDevice(id) {
   $("content").innerHTML = "";
   $("game-strip").innerHTML = "";
   $("tabs").innerHTML = "";
+  runningBarSig = "";
+  $("running-bar").innerHTML = "";
+  $("running-bar").classList.add("hidden");
   $("device-view").classList.toggle("hidden", !id);
   if (!id) { return; }
   savePref("device", id);
@@ -344,8 +347,11 @@ function hackEntries() {
   var hacks = (catalog && catalog.hacks) || {};
   return Object.keys(hacks).map(function (key) {
     var h = hacks[key];
-    return { key: key, name: h.name || key, category: h.category || "Other", toggle: !!h.toggle, action: !!h.action, args: h.args || [] };
-  }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+    return {
+      key: key, name: h.name || key, category: h.category || "Other", group: h.group || h.category || "Other",
+      order: h.order === undefined ? 10000 : h.order, toggle: !!h.toggle, action: !!h.action, args: h.args || []
+    };
+  }).sort(function (a, b) { return a.order - b.order || a.name.localeCompare(b.name); });
 }
 
 function matchesSearch(text) { return !search || text.toLowerCase().indexOf(search) >= 0; }
@@ -406,9 +412,17 @@ function buildContent() {
       return true;
     });
     if (list.length) {
-      content.appendChild(el("div", { class: "section-title", text: activeTab === "Players" || activeTab === "Enemies" ? "More" : activeTab }));
-      var grid = content.appendChild(el("div", { class: "grid" }));
-      list.forEach(function (h) { grid.appendChild(hackRow(h)); });
+      // One titled block per section, in the same order as the in-game menu.
+      var grid = null;
+      var currentGroup = null;
+      list.forEach(function (h) {
+        if (h.group !== currentGroup) {
+          currentGroup = h.group;
+          content.appendChild(el("div", { class: "section-title", text: h.group }));
+          grid = content.appendChild(el("div", { class: "grid" }));
+        }
+        grid.appendChild(hackRow(h));
+      });
     } else if (!ui.playersBox && !ui.enemiesBox) {
       content.appendChild(el("p", { class: "muted", text: search ? "Nothing matches your search on this tab." : "Nothing here." }));
     }
@@ -552,6 +566,7 @@ function buildSettings(content) {
 // ---------- live state ----------
 function applyState(force) {
   renderStrip();
+  renderRunningBar();
   if (!state) { return; }
   $("btn-menu").textContent = state.menuOpen ? "Close menu in game" : "Open menu in game";
 
@@ -576,7 +591,7 @@ function applyState(force) {
 
   var players = state.players || [];
   var enemies = (state.enemies || []).filter(function (e) { return !e.dead; });
-  var sigP = JSON.stringify(players);
+  var sigP = JSON.stringify([players, state.targets || null]);
   var sigE = JSON.stringify(enemies.map(function (e) { return [e.id, e.name, e.distance]; }));
   if (force || sigP !== ui.sigPlayers) {
     ui.sigPlayers = sigP;
@@ -619,18 +634,96 @@ function renderStrip() {
   chip("Host", g.isHost ? "yes" : "no");
 }
 
+// Camera-style hacks that only make sense on other players (same rule as the in-game menu).
+var NOT_ON_SELF = { SpectatePlayer: true, MiniCam: true };
+
+function targetsOf() {
+  var t = (state && state.targets) || {};
+  return { spectating: t.spectating === undefined ? -1 : t.spectating, miniCam: t.miniCam === undefined ? -1 : t.miniCam, demiGod: t.demiGod || [], controlling: t.controlling || null,
+    controlTarget: t.controlTarget === undefined ? -1 : t.controlTarget, aiDriving: !!t.aiDriving };
+}
+
+function nameOfClient(players, clientId) {
+  for (var i = 0; i < players.length; i++) {
+    if (players[i].clientId === clientId) { return players[i].name; }
+  }
+  return "player";
+}
+
+// Builds the button for one player action; toggles that are already aimed at this player become "Stop".
+function playerActionButton(h, p, targets) {
+  var label = shortName(h.name);
+  var active = false;
+  var command = { type: "run", hack: h.key, args: [p.id] };
+  if (h.key === "SpectatePlayer" && targets.spectating === p.clientId) {
+    active = true; label = "Stop spectating"; command = { type: "toggle", hack: h.key, value: false };
+  } else if (h.key === "MiniCam" && targets.miniCam === p.clientId) {
+    active = true; label = "Stop mini cam"; command = { type: "toggle", hack: h.key, value: false };
+  } else if (h.key === "DemiGod" && targets.demiGod.indexOf(p.clientId) >= 0) {
+    // Running Demi God again on the same player removes it.
+    active = true; label = "Remove demi god";
+  }
+  return el("button", {
+    class: "btn small" + (active ? " primary" : ""), type: "button", text: label,
+    onclick: function () { send(command); }
+  });
+}
+
+// "Running now" bar under the game info, on every tab: one tap to stop control / cameras.
+var runningBarSig = "";
+
+function renderRunningBar() {
+  var bar = $("running-bar");
+  var players = (state && state.players) || [];
+  var targets = targetsOf();
+  var toggles = (state && state.toggles) || {};
+  // Rebuild only when something shown here changed, so an open dropdown is not closed by live updates.
+  var sig = JSON.stringify([targets, !!toggles.FreeCam, players.map(function (p) { return [p.id, p.clientId, p.name, p.dead, p.local]; })]);
+  if (sig === runningBarSig) { return; }
+  runningBarSig = sig;
+  bar.innerHTML = "";
+  var stops = [];
+  var controlExtras = [];
+  function stop(label, command) {
+    stops.push(el("button", { class: "btn small primary", type: "button", text: label, onclick: function () { send(command); } }));
+  }
+  if (targets.controlling) {
+    stop("Stop controlling " + targets.controlling, { type: "toggle", hack: "EnemyControl", value: false });
+    // Who the controlled monster goes after (T in game), and who drives it (F9 in game).
+    var pick = el("select", { "aria-label": "Attack target" });
+    pick.appendChild(el("option", { value: "-1", text: "Target: nearest player" }));
+    players.filter(function (p) { return !p.local && !p.dead; }).forEach(function (p) {
+      pick.appendChild(el("option", { value: String(p.id), text: "Target: " + p.name, selected: p.clientId === targets.controlTarget }));
+    });
+    pick.addEventListener("change", function () { send({ type: "controlTarget", player: Number(pick.value) }); });
+    controlExtras.push(pick);
+    controlExtras.push(el("button", {
+      class: "btn small" + (targets.aiDriving ? " primary" : ""), type: "button",
+      text: targets.aiDriving ? "AI driving (take back)" : "Let AI drive",
+      onclick: function () { send({ type: "controlAI", value: !targets.aiDriving }); }
+    }));
+  }
+  if (targets.spectating >= 0) { stop("Stop spectating " + nameOfClient(players, targets.spectating), { type: "toggle", hack: "SpectatePlayer", value: false }); }
+  if (targets.miniCam >= 0) { stop("Stop mini cam (" + nameOfClient(players, targets.miniCam) + ")", { type: "toggle", hack: "MiniCam", value: false }); }
+  if (toggles.FreeCam && !targets.controlling) { stop("Stop free cam", { type: "toggle", hack: "FreeCam", value: false }); }
+  bar.classList.toggle("hidden", stops.length === 0);
+  if (stops.length) {
+    bar.appendChild(el("span", { class: "running-label", text: "Running now:" }));
+    stops.forEach(function (b) { bar.appendChild(b); });
+    controlExtras.forEach(function (x) { bar.appendChild(x); });
+  }
+}
+
 function renderPlayers(players) {
   var box = ui.playersBox;
   if (!box) { return; }
   box.innerHTML = "";
+  var targets = targetsOf();
   if (!players.length) { box.appendChild(el("div", { class: "empty-list", text: "No players (join a lobby first)." })); return; }
   var actions = hackEntries().filter(function (h) { return isSingleArg(h, "player"); });
   players.forEach(function (p) {
-    var buttons = actions.map(function (h) {
-      return el("button", {
-        class: "btn small", type: "button", text: shortName(h.name),
-        onclick: function () { send({ type: "run", hack: h.key, args: [p.id] }); }
-      });
+    var buttons = actions.filter(function (h) { return !(p.local && NOT_ON_SELF[h.key]); }).map(function (h) {
+      return playerActionButton(h, p, targets);
     });
     box.appendChild(el("div", { class: "entity" + (p.dead ? " dead" : "") }, [
       el("div", { class: "entity-head" }, [

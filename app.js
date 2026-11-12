@@ -39,7 +39,7 @@ var ui = freshUi();
 var pendingToggles = {};
 
 function freshUi() {
-  return { toggles: {}, rows: {}, playerSelects: [], enemySelects: [], settings: {}, playersBox: null, enemiesBox: null, sigPlayers: "", sigEnemies: "" };
+  return { toggles: {}, rows: {}, sliders: {}, playerSelects: [], enemySelects: [], settings: {}, playersBox: null, enemiesBox: null, sigPlayers: "", sigEnemies: "" };
 }
 
 // ---------- helpers ----------
@@ -418,7 +418,7 @@ function hackEntries() {
     var h = hacks[key];
     return {
       key: key, name: h.name || key, category: h.category || "Other", group: h.group || h.category || "Other",
-      toggle: !!h.toggle, action: !!h.action, args: h.args || []
+      toggle: !!h.toggle, action: !!h.action, args: h.args || [], slider: h.slider || null
     };
   }).sort(function (a, b) { return byText(a.name, b.name); });
 }
@@ -525,6 +525,10 @@ function hackRow(h) {
     head.appendChild(el("label", { class: "switch" }, [input, el("span", { class: "track" })]));
   }
 
+  if (h.slider) {
+    row.appendChild(sliderControl(h.slider, h.toggle));
+  }
+
   if (h.action && !h.args.length) {
     head.appendChild(el("button", { class: "btn small", type: "button", text: "Run", onclick: function () { send({ type: "run", hack: h.key, args: [] }); } }));
   } else if (h.action) {
@@ -548,6 +552,24 @@ function hackRow(h) {
     row.appendChild(argsBox);
   }
   return row;
+}
+
+// The slider the in-game menu shows next to a feature (FOV, speed, jump...). On a toggle it only shows while
+// the feature is on. Dragging updates the number; letting go sends it to the game.
+function sliderControl(s, onlyWhenOn) {
+  var decimals = s.step < 1 ? (String(s.step).split(".")[1] || "").length : 0;
+  var range = el("input", { type: "range", min: s.min, max: s.max, step: s.step, "aria-label": "Value" });
+  var value = el("span", { class: "slider-value", text: "-" });
+  var box = el("div", { class: "row-slider" + (onlyWhenOn ? " when-on" : "") }, [range, value]);
+  function shown(v) { return Number(v).toFixed(decimals); }
+  range.addEventListener("input", function () { value.textContent = shown(range.value); });
+  range.addEventListener("change", function () {
+    value.textContent = shown(range.value);
+    ui.sliders[s.setting].until = Date.now() + 3000;
+    send({ type: "setting", name: s.setting, value: parseFloat(range.value) });
+  });
+  ui.sliders[s.setting] = { input: range, label: value, shown: shown, until: 0 };
+  return box;
 }
 
 // Builds the input for one argument and returns a function that reads it (undefined = missing).
@@ -660,6 +682,14 @@ function applyState(force) {
     if (document.activeElement === entry.input || settings[key] === undefined) { return; }
     if (entry.type === "bool") { entry.input.checked = !!settings[key]; }
     else if (String(entry.input.value) !== String(settings[key])) { entry.input.value = settings[key]; }
+  });
+
+  Object.keys(ui.sliders).forEach(function (key) {
+    var sl = ui.sliders[key];
+    // Don't jump the slider back while it is being dragged or the new value is on its way.
+    if (settings[key] === undefined || document.activeElement === sl.input || sl.until > now) { return; }
+    sl.input.value = settings[key];
+    sl.label.textContent = sl.shown(settings[key]);
   });
 
   var players = state.players || [];

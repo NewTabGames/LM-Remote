@@ -66,3 +66,10 @@ Object.keys(sampleGroups).forEach(function (key) {
   var h = demo.catalog.hacks[key];
   if (h) { h.group = sampleGroups[key]; h.order = sampleOrder++; }
 });
+
+// Sample sliders (the real ones come from the game).
+demo.catalog.hacks.FOV.slider = { setting: "f_fov", min: 10, max: 180, step: 1 };
+demo.catalog.hacks.SuperSpeed.slider = { setting: "f_movementSpeed", min: 4.6, max: 24.6, step: 0.5 };
+demo.catalog.hacks.SuperJump.slider = { setting: "f_jumpForce", min: 13, max: 213, step: 0.5 };
+demo.state.toggles.FOV = true;
+demo.state.toggles.SuperSpeed = true;

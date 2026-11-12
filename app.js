@@ -10,7 +10,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 
-var TAB_ORDER = ["Self", "Players", "Enemies", "Visuals", "Server", "Troll", "Other", "Settings"];
+// Everything on the panel is listed A-Z: tabs, sections, features, players, enemies and dropdowns.
+var TAB_ORDER = ["Enemies", "Other", "Players", "Self", "Server", "Settings", "Troll", "Visuals"];
 // index.html?demo shows the panel with sample data, without signing in (handy to check the layout on a device).
 var DEMO = /[?&]demo\b/.test(location.search);
 var ONLINE_WINDOW_MS = 30000;
@@ -102,6 +103,9 @@ function serverNow() { return Date.now() + serverOffset; }
 function isOnline(info) {
   return !!(info && info.online && info.lastSeen && serverNow() - info.lastSeen < ONLINE_WINDOW_MS);
 }
+
+// A-Z, ignoring upper/lower case.
+function byText(a, b) { return String(a).toLowerCase().localeCompare(String(b).toLowerCase()); }
 
 function shortName(hackName) {
   var stripped = hackName.replace(/\s*Player\s*/g, " ").replace(/\s+/g, " ").trim();
@@ -260,7 +264,7 @@ function deviceLabel(id) {
 function renderDeviceSelect() {
   var select = $("device-select");
   select.innerHTML = "";
-  var ids = Object.keys(deviceIndex);
+  var ids = Object.keys(deviceIndex).sort(function (a, b) { return byText(deviceLabel(a), deviceLabel(b)); });
   ids.forEach(function (id) {
     select.appendChild(el("option", { value: id, text: deviceLabel(id), selected: id === currentDev }));
   });
@@ -414,9 +418,9 @@ function hackEntries() {
     var h = hacks[key];
     return {
       key: key, name: h.name || key, category: h.category || "Other", group: h.group || h.category || "Other",
-      order: h.order === undefined ? 10000 : h.order, toggle: !!h.toggle, action: !!h.action, args: h.args || []
+      toggle: !!h.toggle, action: !!h.action, args: h.args || []
     };
-  }).sort(function (a, b) { return a.order - b.order || a.name.localeCompare(b.name); });
+  }).sort(function (a, b) { return byText(a.name, b.name); });
 }
 
 function matchesSearch(text) { return !search || text.toLowerCase().indexOf(search) >= 0; }
@@ -425,7 +429,7 @@ function settingEntries() {
   var settings = (catalog && catalog.settings) || {};
   return Object.keys(settings).map(function (key) {
     return { key: key, name: settings[key].name || key, type: settings[key].type };
-  }).filter(function (s) { return matchesSearch(s.name); }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+  }).filter(function (s) { return matchesSearch(s.name); }).sort(function (a, b) { return byText(a.name, b.name); });
 }
 
 function isSingleArg(h, kind) { return h.action && h.args.length === 1 && h.args[0].kind === kind; }
@@ -477,22 +481,26 @@ function buildContent() {
       return true;
     });
     if (list.length) {
-      // One titled block per section, in the same order as the in-game menu.
-      var grid = null;
-      var currentGroup = null;
-      list.forEach(function (h) {
-        if (h.group !== currentGroup) {
-          currentGroup = h.group;
-          content.appendChild(el("div", { class: "section-title", text: h.group }));
-          grid = content.appendChild(el("div", { class: "grid" }));
-        }
-        grid.appendChild(hackRow(h));
+      // One box per section, sections A-Z, features A-Z inside each.
+      var byGroup = {};
+      list.forEach(function (h) { (byGroup[h.group] = byGroup[h.group] || []).push(h); });
+      if (ui.playersBox || ui.enemiesBox) { content.appendChild(el("div", { class: "section-title", text: "Features" })); }
+      var groups = content.appendChild(el("div", { class: "groups" }));
+      Object.keys(byGroup).sort(byText).forEach(function (name) {
+        groups.appendChild(groupBox(name, byGroup[name].map(hackRow)));
       });
     } else if (!ui.playersBox && !ui.enemiesBox) {
       content.appendChild(el("p", { class: "muted", text: search ? "Nothing matches your search on this tab." : "Nothing here." }));
     }
   }
   applyState(true);
+}
+
+function groupBox(title, rows) {
+  return el("section", { class: "group" }, [
+    el("div", { class: "group-title" }, [el("span", { text: title }), el("span", { class: "count", text: String(rows.length) })]),
+    el("div", { class: "group-body" }, rows)
+  ]);
 }
 
 function hackRow(h) {
@@ -601,10 +609,9 @@ function buildSettings(content) {
   content.appendChild(el("div", { class: "toolbar-actions" }, [
     el("button", { class: "btn small", type: "button", text: "Save settings to file", onclick: function () { send({ type: "saveSettings" }); } })
   ]));
-  content.appendChild(el("div", { class: "section-title", text: "Menu settings (applied instantly)" }));
-  var grid = content.appendChild(el("div", { class: "grid" }));
   var entries = settingEntries();
-  if (!entries.length) { grid.appendChild(el("p", { class: "muted", text: "No settings match." })); }
+  if (!entries.length) { content.appendChild(el("p", { class: "muted", text: "No settings match." })); return; }
+  var rows = [];
   entries.forEach(function (s) {
     var row = el("div", { class: "row" });
     var head = el("div", { class: "row-head" }, [el("span", { class: "row-name", text: s.name })]);
@@ -624,8 +631,9 @@ function buildSettings(content) {
       head.appendChild(input);
     }
     ui.settings[s.key] = { input: input, type: s.type };
-    grid.appendChild(row);
+    rows.push(row);
   });
+  content.appendChild(el("div", { class: "groups single" }, [groupBox("Menu settings (applied instantly)", rows)]));
 }
 
 // ---------- live state ----------
@@ -679,7 +687,7 @@ function fillSelects(selects, options) {
     var previous = select.value;
     select.innerHTML = "";
     if (!options.length) { select.appendChild(el("option", { value: "", text: "none available" })); return; }
-    options.forEach(function (o) { select.appendChild(el("option", { value: String(o.value), text: o.text })); });
+    options.slice().sort(function (a, b) { return byText(a.text, b.text); }).forEach(function (o) { select.appendChild(el("option", { value: String(o.value), text: o.text })); });
     if (previous && options.some(function (o) { return String(o.value) === previous; })) { select.value = previous; }
   });
 }
@@ -757,7 +765,7 @@ function renderRunningBar() {
     // Who the controlled monster goes after (T in game), and who drives it (F9 in game).
     var pick = el("select", { "aria-label": "Attack target" });
     pick.appendChild(el("option", { value: "-1", text: "Target: nearest player" }));
-    players.filter(function (p) { return !p.local && !p.dead; }).forEach(function (p) {
+    players.filter(function (p) { return !p.local && !p.dead; }).sort(function (a, b) { return byText(a.name, b.name); }).forEach(function (p) {
       pick.appendChild(el("option", { value: String(p.id), text: "Target: " + p.name, selected: p.clientId === targets.controlTarget }));
     });
     pick.addEventListener("change", function () { send({ type: "controlTarget", player: Number(pick.value) }); });
@@ -786,7 +794,8 @@ function renderPlayers(players) {
   var targets = targetsOf();
   if (!players.length) { box.appendChild(el("div", { class: "empty-list", text: "No players (join a lobby first)." })); return; }
   var actions = hackEntries().filter(function (h) { return isSingleArg(h, "player"); });
-  players.forEach(function (p) {
+  actions.sort(function (a, b) { return byText(shortName(a.name), shortName(b.name)); });
+  players.slice().sort(function (a, b) { return byText(a.name, b.name); }).forEach(function (p) {
     var buttons = actions.filter(function (h) { return !(p.local && NOT_ON_SELF[h.key]); }).map(function (h) {
       return playerActionButton(h, p, targets);
     });
@@ -805,11 +814,14 @@ function renderEnemies(enemies) {
   if (!box) { return; }
   box.innerHTML = "";
   if (!enemies.length) { box.appendChild(el("div", { class: "empty-list", text: "No living enemies right now." })); return; }
-  var actions = hackEntries().filter(function (h) { return isSingleArg(h, "enemy"); });
-  enemies.slice().sort(function (a, b) { return a.distance - b.distance; }).forEach(function (e) {
+  function enemyLabel(h) { return h.name.replace(/\s*Enemy\s*/g, " ").trim() || h.name; }
+  var actions = hackEntries().filter(function (h) { return isSingleArg(h, "enemy"); })
+    .sort(function (a, b) { return byText(enemyLabel(a), enemyLabel(b)); });
+  // A-Z by name; several of the same kind are listed nearest first.
+  enemies.slice().sort(function (a, b) { return byText(a.name, b.name) || a.distance - b.distance; }).forEach(function (e) {
     var buttons = actions.map(function (h) {
       return el("button", {
-        class: "btn small", type: "button", text: h.name.replace(/\s*Enemy\s*/g, " ").trim() || h.name,
+        class: "btn small", type: "button", text: enemyLabel(h),
         onclick: function () { send({ type: "run", hack: h.key, args: [e.id] }); }
       });
     });

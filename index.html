@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <title>Lethal Menu Remote</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css" id="main-css">
   <script>
     // Small shims so the Firebase SDK also runs on older tablet browsers (Android 4.4/5 Chrome).
     if (!String.prototype.replaceAll) {
@@ -29,7 +29,68 @@
       document.getElementById("boot").textContent = "This browser is too old to run the panel. Update Chrome (Play Store) and try again.";
     });
   </script>
-  <script type="module" src="app.js"></script>
+  <script>
+    // Auto-update: load the newest app.js/style.css (bypassing caches), then check every minute and whenever
+    // the tab comes back into view. If any panel file changed on the server, the page reloads itself.
+    (function () {
+      var FILES = ["index.html", "app.js", "style.css", "firebase-config.js"];
+      var CHECK_EVERY_MS = 60000;
+      var baseline = null;
+      var checking = false;
+
+      function hash(text) {
+        var h = 5381;
+        for (var i = 0; i < text.length; i++) { h = ((h << 5) + h + text.charCodeAt(i)) | 0; }
+        return (h >>> 0).toString(36);
+      }
+
+      // The ?t= part also skips GitHub's CDN cache, so a new upload is seen within a minute.
+      function fetchVersion() {
+        var t = Date.now();
+        return Promise.all(FILES.map(function (f) {
+          return fetch(f + "?t=" + t, { cache: "no-store" }).then(function (r) { return r.ok ? r.text() : ""; });
+        })).then(function (texts) { return hash(texts.join("\u0000")); });
+      }
+
+      function loadApp(version) {
+        var suffix = version ? "?v=" + version : "";
+        if (version) { document.getElementById("main-css").href = "style.css" + suffix; }
+        var script = document.createElement("script");
+        script.type = "module";
+        script.src = "app.js" + suffix;
+        document.head.appendChild(script);
+      }
+
+      function busyTyping() {
+        var a = document.activeElement;
+        return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT");
+      }
+
+      function check() {
+        if (checking || baseline === null || document.hidden) { return; }
+        checking = true;
+        fetchVersion().then(function (version) {
+          checking = false;
+          if (version === baseline) { return; }
+          if (busyTyping()) { return; } // try again next time instead of losing what is being typed
+          var note = document.createElement("div");
+          note.className = "update-note";
+          note.textContent = "Panel updated, reloading...";
+          document.body.appendChild(note);
+          setTimeout(function () { location.reload(); }, 800);
+        }, function () { checking = false; });
+      }
+
+      if (!window.fetch || !window.Promise) { loadApp(null); return; }
+      fetchVersion().then(function (version) {
+        baseline = version;
+        loadApp(version);
+      }, function () { loadApp(null); });
+      setInterval(check, CHECK_EVERY_MS);
+      document.addEventListener("visibilitychange", function () { if (!document.hidden) { check(); } });
+      window.addEventListener("focus", check);
+    })();
+  </script>
 </head>
 <body>
   <div id="boot" class="boot">Loading...</div>

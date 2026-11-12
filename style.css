@@ -176,3 +176,6 @@ input:focus, select:focus { border-color: var(--accent); }
 @media (hover: hover) {
   .btn:hover, .tab:hover { border-color: var(--accent); }
 }
+
+/* Shown for a moment before the page reloads itself after an update. */
+.update-note { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: var(--accent); color: #fff; text-align: center; padding: 10px; font-size: 15px; }

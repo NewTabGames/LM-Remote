@@ -179,3 +179,13 @@ input:focus, select:focus { border-color: var(--accent); }
 
 /* Shown for a moment before the page reloads itself after an update. */
 .update-note { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: var(--accent); color: #fff; text-align: center; padding: 10px; font-size: 15px; }
+
+/* Accounts and pairing */
+.linkish { display: block; margin: 10px auto 0; background: none; border: 0; color: var(--muted); font: inherit; font-size: 14px; text-decoration: underline; cursor: pointer; min-height: 36px; }
+.account { display: flex; align-items: center; flex-wrap: wrap; }
+.account > * { margin: 2px 0 2px 6px; }
+.pair-box { max-width: 1200px; margin: 12px; }
+@media (min-width: 1224px) { .pair-box { margin: 12px auto; } }
+.pair-row { display: flex; flex-wrap: wrap; align-items: center; }
+.pair-row input { flex: 1 1 160px; max-width: 220px; font: bold 22px/1 Consolas, "Courier New", monospace; letter-spacing: 3px; text-transform: uppercase; margin: 0 8px 8px 0; }
+.pair-row .btn { margin: 0 8px 8px 0; }

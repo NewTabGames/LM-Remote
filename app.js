@@ -3,10 +3,10 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  signOut, GoogleAuthProvider, signInWithPopup
+  signOut, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getDatabase, ref, onValue, set, push, update, remove, serverTimestamp
+  getDatabase, ref, onValue, get, push, update, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -21,12 +21,12 @@ var db = getDatabase(app);
 
 var user = null;
 var serverOffset = 0;
-var ownerUnsub = null;
+var profile = null;
+var profileUnsub = null;
 var ownerSubs = [];
 var deviceIndex = {};
 var deviceInfo = {};
 var infoSubs = {};
-var pendingDevices = {};
 var currentDev = null;
 var devSubs = [];
 var catalog = null;
@@ -67,7 +67,7 @@ function loadPref(key) { try { return localStorage.getItem("lmr." + key); } catc
 function savePref(key, value) { try { localStorage.setItem("lmr." + key, value); } catch (e) { /* private mode */ } }
 
 function show(view) {
-  ["view-login", "view-claim", "view-denied", "view-app"].forEach(function (id) {
+  ["view-login", "view-username", "view-app"].forEach(function (id) {
     $(id).classList.toggle("hidden", id !== view);
   });
   $("boot").classList.add("hidden");
@@ -84,11 +84,13 @@ function friendlyError(err) {
   var map = {
     "auth/invalid-credential": "Wrong email or password.",
     "auth/wrong-password": "Wrong email or password.",
-    "auth/user-not-found": "No account with that email. Use Create account.",
+    "auth/user-not-found": "No account with that email. Use Create an account.",
+    "auth/invalid-email": "That email address does not look right.",
+    "auth/too-many-requests": "Too many attempts. Wait a minute and try again.",
+    "auth/missing-email": "Enter your email first.",
     "auth/email-already-in-use": "That email already has an account. Sign in instead.",
     "auth/weak-password": "Password must be at least 6 characters.",
     "auth/operation-not-allowed": "This sign-in method is not enabled in Firebase Authentication.",
-    "auth/popup-blocked": "The browser blocked the Google popup.",
     "auth/network-request-failed": "Network error. Check your connection.",
     "PERMISSION_DENIED": "Permission denied (are the database rules deployed?)."
   };
@@ -106,77 +108,125 @@ function shortName(hackName) {
   return stripped || hackName;
 }
 
-// ---------- auth ----------
-$("login-form").addEventListener("submit", function (e) {
-  e.preventDefault();
-  $("login-error").textContent = "";
-  signInWithEmailAndPassword(auth, $("login-email").value.trim(), $("login-password").value)
-    .catch(function (err) { $("login-error").textContent = friendlyError(err); });
-});
+// ---------- accounts ----------
+var USERNAME_RE = /^[a-z0-9_]{3,20}$/;
+var signupMode = false;
 
-$("btn-create").addEventListener("click", function () {
-  $("login-error").textContent = "";
-  var email = $("login-email").value.trim();
-  var password = $("login-password").value;
-  if (!email || password.length < 6) {
-    $("login-error").textContent = "Enter an email and a password (6+ characters) first.";
+function setSignupMode(on) {
+  signupMode = on;
+  Array.prototype.forEach.call(document.querySelectorAll(".signup-only"), function (n) { n.classList.toggle("hidden", !on); });
+  $("auth-submit").textContent = on ? "Create account" : "Sign in";
+  $("auth-switch").textContent = on ? "I already have an account" : "Create an account";
+  $("auth-intro").textContent = on ? "Make an account, then pair your PC with a code from the in-game menu." : "Sign in to control your PC.";
+  $("auth-password").setAttribute("autocomplete", on ? "new-password" : "current-password");
+  $("auth-error").textContent = "";
+}
+
+$("auth-switch").addEventListener("click", function () { setSignupMode(!signupMode); });
+
+function cleanUsername(value) { return String(value || "").trim().toLowerCase(); }
+
+// Claims usernames/{name} and writes the profile in one step; fails if the name is taken.
+function claimUsername(name) {
+  if (!USERNAME_RE.test(name)) {
+    return Promise.reject(new Error("Username must be 3-20 characters: letters, numbers or _."));
+  }
+  return get(ref(db, "usernames/" + name)).then(function (snap) {
+    if (snap.exists() && snap.val() !== user.uid) { throw new Error("That username is taken."); }
+    var changes = {};
+    changes["usernames/" + name] = user.uid;
+    changes["users/" + user.uid + "/profile"] = { username: name, created: serverTimestamp() };
+    return update(ref(db), changes);
+  }).catch(function (err) {
+    if (err && err.code === "PERMISSION_DENIED") { throw new Error("That username is taken."); }
+    throw err;
+  });
+}
+
+// Username typed on the sign-up form, claimed as soon as the new account exists.
+var pendingUsername = null;
+
+$("auth-form").addEventListener("submit", function (e) {
+  e.preventDefault();
+  $("auth-error").textContent = "";
+  var email = $("auth-email").value.trim();
+  var password = $("auth-password").value;
+  if (!signupMode) {
+    signInWithEmailAndPassword(auth, email, password).catch(function (err) { $("auth-error").textContent = friendlyError(err); });
     return;
   }
-  createUserWithEmailAndPassword(auth, email, password)
-    .catch(function (err) { $("login-error").textContent = friendlyError(err); });
+  var name = cleanUsername($("auth-username").value);
+  if (!USERNAME_RE.test(name)) { $("auth-error").textContent = "Username must be 3-20 characters: letters, numbers or _."; return; }
+  if (password.length < 6) { $("auth-error").textContent = "Password must be at least 6 characters."; return; }
+  if (password !== $("auth-password2").value) { $("auth-error").textContent = "The passwords do not match."; return; }
+  pendingUsername = name;
+  createUserWithEmailAndPassword(auth, email, password).catch(function (err) {
+    pendingUsername = null;
+    $("auth-error").textContent = friendlyError(err);
+  });
 });
 
-$("btn-google").addEventListener("click", function () {
-  $("login-error").textContent = "";
-  signInWithPopup(auth, new GoogleAuthProvider())
-    .catch(function (err) { $("login-error").textContent = friendlyError(err); });
+$("auth-forgot").addEventListener("click", function () {
+  var email = $("auth-email").value.trim();
+  if (!email) { $("auth-error").textContent = "Type your email above, then press Forgot password again."; return; }
+  sendPasswordResetEmail(auth, email)
+    .then(function () { $("auth-error").textContent = ""; toast("If that email has an account, a reset link is on its way.", "ok"); })
+    .catch(function (err) { $("auth-error").textContent = friendlyError(err); });
+});
+
+$("btn-pick-username").addEventListener("click", function () {
+  $("pick-error").textContent = "";
+  claimUsername(cleanUsername($("pick-username").value)).catch(function (err) { $("pick-error").textContent = friendlyError(err); });
 });
 
 document.addEventListener("click", function (e) {
-  var target = e.target.closest ? e.target.closest("[data-action='signout']") : null;
-  if (target) { signOut(auth); }
-});
-
-$("btn-claim").addEventListener("click", function () {
-  set(ref(db, "owner"), user.uid).catch(function (err) { $("claim-error").textContent = friendlyError(err); });
+  if (!e.target.closest) { return; }
+  if (e.target.closest("[data-action='signout']")) { signOut(auth); }
+  if (e.target.closest("[data-action='add-pc']")) { openPairBox(); }
 });
 
 onAuthStateChanged(auth, function (u) {
   if (DEMO) { return; }
   user = u;
-  stopOwner();
-  if (ownerUnsub) { ownerUnsub(); ownerUnsub = null; }
+  profile = null;
+  stopAccount();
+  if (profileUnsub) { profileUnsub(); profileUnsub = null; }
   if (!u) { show("view-login"); return; }
-  ownerUnsub = onValue(ref(db, "owner"), function (snap) {
-    var owner = snap.val();
-    if (!owner) {
-      stopOwner();
-      $("claim-email").textContent = u.email || u.displayName || "this account";
-      show("view-claim");
-    } else if (owner !== u.uid) {
-      stopOwner();
-      show("view-denied");
-    } else {
-      show("view-app");
-      startOwner();
+  if (pendingUsername) {
+    var name = pendingUsername;
+    pendingUsername = null;
+    claimUsername(name).catch(function (err) {
+      $("pick-username").value = name;
+      $("pick-error").textContent = friendlyError(err) + " Pick another.";
+    });
+  }
+  profileUnsub = onValue(ref(db, "users/" + u.uid + "/profile"), function (snap) {
+    profile = snap.val();
+    if (!profile || !profile.username) {
+      stopAccount();
+      show("view-username");
+      return;
     }
+    $("account-name").textContent = profile.username;
+    show("view-app");
+    startAccount();
   }, function (err) { toast(friendlyError(err), "fail"); });
 });
 
-// ---------- owner data ----------
-function startOwner() {
+// ---------- this account's PCs ----------
+function startAccount() {
   if (ownerSubs.length) { return; }
   ownerSubs.push(onValue(ref(db, ".info/serverTimeOffset"), function (snap) { serverOffset = snap.val() || 0; }));
-  ownerSubs.push(onValue(ref(db, "pending"), function (snap) { pendingDevices = snap.val() || {}; renderPending(); }));
-  ownerSubs.push(onValue(ref(db, "deviceIndex"), function (snap) { deviceIndex = snap.val() || {}; syncDevices(); }));
+  ownerSubs.push(onValue(ref(db, "users/" + user.uid + "/devices"), function (snap) { deviceIndex = snap.val() || {}; syncDevices(); }));
 }
 
-function stopOwner() {
+function stopAccount() {
   ownerSubs.forEach(function (unsub) { unsub(); });
   ownerSubs = [];
   Object.keys(infoSubs).forEach(function (id) { infoSubs[id](); });
   infoSubs = {};
   deviceInfo = {};
+  deviceIndex = {};
   selectDevice(null);
 }
 
@@ -190,7 +240,7 @@ function syncDevices() {
         deviceInfo[id] = snap.val();
         renderDeviceSelect();
         refreshOnline();
-      });
+      }, function () { deviceInfo[id] = null; renderDeviceSelect(); });
     }
   });
   var ids = Object.keys(deviceIndex);
@@ -214,6 +264,7 @@ function renderDeviceSelect() {
   ids.forEach(function (id) {
     select.appendChild(el("option", { value: id, text: deviceLabel(id), selected: id === currentDev }));
   });
+  if (!ids.length) { select.appendChild(el("option", { value: "", text: "No PCs yet" })); }
   select.disabled = ids.length < 2;
   $("no-device").classList.toggle("hidden", ids.length > 0);
   $("device-view").classList.toggle("hidden", !currentDev);
@@ -221,44 +272,58 @@ function renderDeviceSelect() {
 
 $("device-select").addEventListener("change", function (e) { selectDevice(e.target.value); });
 
-function renderPending() {
-  var box = $("pending");
-  box.innerHTML = "";
-  var ids = Object.keys(pendingDevices);
-  box.classList.toggle("hidden", ids.length === 0);
-  ids.forEach(function (id) {
-    var p = pendingDevices[id] || {};
-    box.appendChild(el("div", { class: "pending-item" }, [
-      el("div", null, [
-        el("div", { text: "New PC wants access: " + (p.name || "Unknown") }),
-        el("div", { class: "muted", text: "Only approve if this code matches the one in your in-game menu." })
-      ]),
-      el("span", { class: "code", text: p.code || "?" }),
-      el("div", null, [
-        el("button", { class: "btn primary", type: "button", text: "Approve", onclick: function () { approveDevice(id, p.name); } }),
-        el("button", { class: "btn", type: "button", text: "Dismiss", onclick: function () { remove(ref(db, "pending/" + id)); } })
-      ])
-    ]));
-  });
+// ---------- pairing a PC with a code ----------
+function openPairBox() {
+  $("pair-box").classList.remove("hidden");
+  $("pair-error").textContent = "";
+  $("pair-code").value = "";
+  $("pair-code").focus();
 }
 
-function approveDevice(id, name) {
-  var changes = {};
-  changes["devices/" + id + "/approved"] = true;
-  changes["deviceIndex/" + id] = { name: name || "PC", added: serverTimestamp() };
-  changes["pending/" + id] = null;
-  update(ref(db), changes)
-    .then(function () { toast("Approved " + (name || "PC"), "ok"); selectDevice(id); })
-    .catch(function (err) { toast(friendlyError(err), "fail"); });
+$("btn-add-pc").addEventListener("click", openPairBox);
+$("btn-pair-cancel").addEventListener("click", function () { $("pair-box").classList.add("hidden"); });
+$("pair-code").addEventListener("keydown", function (e) { if (e.key === "Enter") { pairDevice(); } });
+$("btn-pair").addEventListener("click", function () { pairDevice(); });
+
+function pairDevice() {
+  var code = $("pair-code").value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  $("pair-error").textContent = "";
+  if (code.length !== 6) { $("pair-error").textContent = "The code is 6 characters, shown in the in-game menu."; return; }
+  if (DEMO) { toast("Demo: would pair code " + code, "ok"); return; }
+  $("btn-pair").disabled = true;
+  get(ref(db, "pairCodes/" + code)).then(function (snap) {
+    var pc = snap.val();
+    if (!pc || !pc.device) { throw new Error("Code not found. Check it, or wait for the menu to show a new one."); }
+    if (pc.at && serverNow() - pc.at > 600000) { throw new Error("That code expired. The menu shows a new one; use that."); }
+    var changes = {};
+    changes["devices/" + pc.device + "/owner"] = { uid: user.uid, username: profile.username, code: code, at: serverTimestamp() };
+    changes["users/" + user.uid + "/devices/" + pc.device] = { name: pc.name || "PC", added: serverTimestamp() };
+    return update(ref(db), changes).then(function () {
+      $("pair-box").classList.add("hidden");
+      toast("Paired " + (pc.name || "PC") + ". It connects within a few seconds.", "ok");
+      selectDevice(pc.device);
+    }, function (err) {
+      if (err && err.code === "PERMISSION_DENIED") { throw new Error("That PC is already paired to an account (or the code just expired)."); }
+      throw err;
+    });
+  }).catch(function (err) {
+    $("pair-error").textContent = friendlyError(err);
+  }).then(function () { $("btn-pair").disabled = false; });
 }
 
 $("btn-remove-device").addEventListener("click", function () {
   if (!currentDev) { return; }
-  if (!window.confirm("Remove this PC? It will have to be approved again.")) { return; }
+  if (!window.confirm("Remove this PC from your account? It will show a new pairing code in the menu.")) { return; }
+  var dev = currentDev;
   var changes = {};
-  changes["devices/" + currentDev] = null;
-  changes["deviceIndex/" + currentDev] = null;
-  update(ref(db), changes).catch(function (err) { toast(friendlyError(err), "fail"); });
+  changes["devices/" + dev] = null;
+  changes["users/" + user.uid + "/devices/" + dev] = null;
+  update(ref(db), changes).catch(function () {
+    // The PC entry may already be gone (e.g. it was reset); still drop it from the list.
+    var only = {};
+    only["users/" + user.uid + "/devices/" + dev] = null;
+    return update(ref(db), only);
+  }).catch(function (err) { toast(friendlyError(err), "fail"); });
 });
 
 // ---------- selected device ----------
@@ -764,12 +829,11 @@ if (DEMO) {
     show("view-app");
     deviceIndex = { demo: { name: "Demo PC" } };
     deviceInfo = { demo: { name: "Demo PC", online: true, lastSeen: Date.now(), version: m.demo.catalog.version } };
-    pendingDevices = { laptop: { name: "LAPTOP", code: "K7Q2MZ" } };
+    $("account-name").textContent = "demo_user";
     serverOffset = 0;
     currentDev = "demo";
     catalog = m.demo.catalog;
     state = m.demo.state;
-    renderPending();
     renderDeviceSelect();
     renderTabs();
     buildContent();

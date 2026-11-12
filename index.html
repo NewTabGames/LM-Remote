@@ -95,40 +95,33 @@
 <body>
   <div id="boot" class="boot">Loading...</div>
 
-  <!-- Sign in -->
+  <!-- Sign in / create account -->
   <section id="view-login" class="view hidden">
     <div class="card login">
-      <h1>Lethal Menu <span class="accent">Remote</span></h1>
-      <p class="muted">Sign in to control your menu.</p>
-      <form id="login-form" autocomplete="on">
-        <label class="field">Email<input id="login-email" type="email" autocomplete="username" required></label>
-        <label class="field">Password<input id="login-password" type="password" autocomplete="current-password" minlength="6" required></label>
-        <button class="btn primary wide" type="submit">Sign in</button>
-        <button class="btn wide" type="button" id="btn-create">Create account</button>
+      <h1>Lethal Menu Remote</h1>
+      <p class="muted" id="auth-intro">Sign in to control your PC.</p>
+      <form id="auth-form" autocomplete="on">
+        <label class="field">Email<input id="auth-email" type="email" autocomplete="email" required></label>
+        <label class="field signup-only hidden">Username<input id="auth-username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="20" placeholder="3-20 letters, numbers or _"></label>
+        <label class="field">Password<input id="auth-password" type="password" autocomplete="current-password" minlength="6" required></label>
+        <label class="field signup-only hidden">Confirm password<input id="auth-password2" type="password" autocomplete="new-password" minlength="6"></label>
+        <button class="btn primary wide" type="submit" id="auth-submit">Sign in</button>
       </form>
-      <div class="divider"><span>or</span></div>
-      <button class="btn wide" id="btn-google" type="button">Sign in with Google</button>
-      <p id="login-error" class="error"></p>
+      <button class="btn wide" type="button" id="auth-switch">Create an account</button>
+      <button class="linkish" type="button" id="auth-forgot">Forgot password?</button>
+      <p id="auth-error" class="error"></p>
     </div>
   </section>
 
-  <!-- First sign-in: claim ownership -->
-  <section id="view-claim" class="view hidden">
+  <!-- Signed in but no username yet (e.g. older account) -->
+  <section id="view-username" class="view hidden">
     <div class="card login">
-      <h1>Claim this panel</h1>
-      <p class="muted">No one owns this panel yet. Claiming it makes <b id="claim-email"></b> the only account that can control your menu. This can only be done once.</p>
-      <button class="btn primary wide" id="btn-claim" type="button">Claim panel</button>
+      <h1>Pick a username</h1>
+      <p class="muted">This is the name shown in your in-game menu once your PC is connected.</p>
+      <label class="field">Username<input id="pick-username" type="text" autocapitalize="none" spellcheck="false" maxlength="20" placeholder="3-20 letters, numbers or _"></label>
+      <button class="btn primary wide" type="button" id="btn-pick-username">Save</button>
       <button class="btn wide" data-action="signout" type="button">Sign out</button>
-      <p id="claim-error" class="error"></p>
-    </div>
-  </section>
-
-  <!-- Signed in with the wrong account -->
-  <section id="view-denied" class="view hidden">
-    <div class="card login">
-      <h1>Not authorized</h1>
-      <p class="muted">This panel belongs to another account.</p>
-      <button class="btn wide" data-action="signout" type="button">Sign out</button>
+      <p id="pick-error" class="error"></p>
     </div>
   </section>
 
@@ -140,18 +133,32 @@
         <span id="device-dot" class="dot"></span>
         <select id="device-select" aria-label="Device"></select>
       </div>
-      <button class="btn small" data-action="signout" type="button">Sign out</button>
+      <div class="account">
+        <span id="account-name" class="muted"></span>
+        <button class="btn small" id="btn-add-pc" type="button">Add PC</button>
+        <button class="btn small" data-action="signout" type="button">Sign out</button>
+      </div>
     </header>
 
-    <div id="pending" class="pending hidden"></div>
+    <div id="pair-box" class="card pair-box hidden">
+      <h2>Add a PC</h2>
+      <ol class="muted steps">
+        <li>On that PC, start Lethal Company with Lethal Menu.</li>
+        <li>In the menu: <b>Settings &gt; Remote Panel &gt; Enable Remote</b>. A 6-character pairing code appears.</li>
+        <li>Type the code here. Codes expire after 10 minutes.</li>
+      </ol>
+      <div class="pair-row">
+        <input id="pair-code" type="text" maxlength="8" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABC123" aria-label="Pairing code">
+        <button class="btn primary" id="btn-pair" type="button">Pair</button>
+        <button class="btn" id="btn-pair-cancel" type="button">Cancel</button>
+      </div>
+      <p id="pair-error" class="error"></p>
+    </div>
 
     <div id="no-device" class="card empty hidden">
       <h2>No PC connected yet</h2>
-      <ol class="muted steps">
-        <li>Fill <code>apiKey</code> and <code>databaseUrl</code> in <code>lethalmenu.remote.json</code> in the game folder.</li>
-        <li>In the game: <b>Settings &gt; Remote Panel &gt; Enable</b>.</li>
-        <li>A pairing code appears in the menu and here. Approve it.</li>
-      </ol>
+      <p class="muted">Install Lethal Menu on your PC, then pair it with your account.</p>
+      <button class="btn primary" type="button" data-action="add-pc">Add PC</button>
     </div>
 
     <div id="device-view" class="hidden">

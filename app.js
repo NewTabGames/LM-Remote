@@ -10,8 +10,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 
-// Everything on the panel is listed A-Z: tabs, sections, features, players, enemies and dropdowns.
-var TAB_ORDER = ["Enemies", "Other", "Players", "Self", "Server", "Settings", "Troll", "Visuals"];
+// Tabs are in a fixed order; everything inside them (sections, features, players, enemies, dropdowns) is A-Z.
+var TAB_ORDER = ["Visuals", "Troll", "Self", "Players", "Enemies", "Server", "Other", "Settings"];
 // index.html?demo shows the panel with sample data, without signing in (handy to check the layout on a device).
 var DEMO = /[?&]demo\b/.test(location.search);
 var ONLINE_WINDOW_MS = 30000;
@@ -543,7 +543,7 @@ function hackRow(h) {
         var values = [];
         for (var i = 0; i < getters.length; i++) {
           var value = getters[i]();
-          if (value === undefined) { toast("Fill in " + h.args[i].name, "fail"); return; }
+          if (value === undefined) { toast((h.args[i].kind === "enemy" || h.args[i].kind === "player" ? "Pick " : "Fill in ") + argName(h.args[i]).toLowerCase(), "fail"); return; }
           values.push(value);
         }
         send({ type: "run", hack: h.key, args: values });
@@ -573,8 +573,16 @@ function sliderControl(s, onlyWhenOn) {
 }
 
 // Builds the input for one argument and returns a function that reads it (undefined = missing).
+// The game names some inputs after one-letter code names ("E"); show what they are instead.
+function argName(arg) {
+  if (arg.kind === "enemy") { return "Enemy"; }
+  if (arg.kind === "player") { return "Player"; }
+  if (arg.kind === "vector3") { return "Position"; }
+  return arg.name && arg.name.length > 2 ? arg.name : "Value";
+}
+
 function argControl(arg, box) {
-  var label = el("label", { class: "arg" }, [arg.name]);
+  var label = el("label", { class: "arg" }, [argName(arg)]);
   box.appendChild(label);
   if (arg.kind === "player" || arg.kind === "enemy") {
     var select = el("select");
@@ -700,23 +708,23 @@ function applyState(force) {
     ui.sigPlayers = sigP;
     fillSelects(ui.playerSelects, players.map(function (p) {
       return { value: p.id, text: p.name + (p.local ? " (you)" : "") + (p.dead ? " (dead)" : "") };
-    }));
+    }), "No players (join a lobby first)");
     renderPlayers(players);
   }
   if (force || sigE !== ui.sigEnemies) {
     ui.sigEnemies = sigE;
     fillSelects(ui.enemySelects, enemies.map(function (e) {
       return { value: e.id, text: e.name + " (" + e.distance + "m" + (e.inside ? ", inside" : "") + ")" };
-    }));
+    }), "No living enemies right now");
     renderEnemies(enemies);
   }
 }
 
-function fillSelects(selects, options) {
+function fillSelects(selects, options, emptyText) {
   selects.forEach(function (select) {
     var previous = select.value;
     select.innerHTML = "";
-    if (!options.length) { select.appendChild(el("option", { value: "", text: "none available" })); return; }
+    if (!options.length) { select.appendChild(el("option", { value: "", text: emptyText })); return; }
     options.slice().sort(function (a, b) { return byText(a.text, b.text); }).forEach(function (o) { select.appendChild(el("option", { value: String(o.value), text: o.text })); });
     if (previous && options.some(function (o) { return String(o.value) === previous; })) { select.value = previous; }
   });

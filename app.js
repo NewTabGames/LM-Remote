@@ -11,7 +11,9 @@ import {
 import { firebaseConfig } from "./firebase-config.js";
 
 // Tabs are in a fixed order; everything inside them (sections, features, players, enemies, dropdowns) is A-Z.
-var TAB_ORDER = ["Visuals", "Troll", "Self", "Players", "Enemies", "Server", "Other", "Settings"];
+var TAB_ORDER = ["Visuals", "Troll", "Self", "Players", "Enemies", "Map", "Server", "Other", "Settings"];
+// Tabs that are always shown, even when no feature belongs to them.
+var FIXED_TABS = { Players: true, Enemies: true, Map: true, Settings: true };
 // index.html?demo shows the panel with sample data, without signing in (handy to check the layout on a device).
 var DEMO = /[?&]demo\b/.test(location.search);
 var ONLINE_WINDOW_MS = 30000;
@@ -338,6 +340,7 @@ function selectDevice(id) {
   state = null;
   lastResultSeen = undefined;
   pendingToggles = {};
+  setMapData(null);
   $("content").innerHTML = "";
   $("game-strip").innerHTML = "";
   $("tabs").innerHTML = "";
@@ -357,6 +360,9 @@ function selectDevice(id) {
     state = snap.val();
     applyState();
   }));
+  devSubs.push(onValue(ref(db, base + "map"), function (snap) {
+    setMapData(snap.val());
+  }, function () { /* database rules without the map yet: the Map tab just says there is no map */ }));
   devSubs.push(onValue(ref(db, base + "lastResult"), function (snap) {
     var result = snap.val();
     var resultId = result ? result.id : null;
@@ -463,12 +469,12 @@ function renderTabs() {
   });
   counts.Settings = settingEntries().length;
   TAB_ORDER.forEach(function (tab) {
-    if (!counts[tab] && tab !== "Players" && tab !== "Enemies" && tab !== "Settings") { return; }
+    if (!counts[tab] && !FIXED_TABS[tab]) { return; }
     tabs.appendChild(el("button", {
       class: "tab" + (tab === activeTab ? " active" : ""),
       type: "button",
       onclick: function () { activeTab = tab; savePref("tab", tab); renderTabs(); buildContent(); }
-    }, [tab, el("span", { class: "count", text: String(counts[tab] || 0) })]));
+    }, [tab, tab === "Map" ? null : el("span", { class: "count", text: String(counts[tab] || 0) })]));
   });
 }
 
@@ -476,12 +482,15 @@ function buildContent() {
   var content = $("content");
   content.innerHTML = "";
   ui = freshUi();
+  mapUi = null;
   if (!catalog) {
     content.appendChild(el("p", { class: "muted", text: "Waiting for the menu to send its feature list... (start the game with the menu loaded)" }));
     return;
   }
   if (activeTab === "Settings") {
     buildSettings(content);
+  } else if (activeTab === "Map") {
+    buildMap(content);
   } else {
     if (activeTab === "Players" && !search) {
       content.appendChild(el("div", { class: "section-title", text: "Players in lobby" }));
@@ -728,6 +737,7 @@ function buildSettings(content) {
 function applyState(force) {
   renderStrip();
   renderRunningBar();
+  drawMap();
   if (!state) { return; }
   $("btn-menu").textContent = state.menuOpen ? "Close menu in game" : "Open menu in game";
   // Stealth Mode: the PC shows no menu and no notifications; this website is the only control.
@@ -846,11 +856,26 @@ function renderStrip() {
   if (!g.inRound) { chip("Status", "Main menu / lobby list"); return; }
   chip("Moon", g.moon || "-");
   chip("Phase", g.inShipPhase ? "In orbit" : (g.landed ? "Landed" : "Travelling"));
-  if (g.localName) { chip("You", g.alive ? g.localName + " (" + g.health + " HP)" : g.localName + " (dead)"); }
+  // A card per player: you first, then everyone else A-Z.
+  var players = (state.players || []).slice().sort(function (a, b) { return (b.local ? 1 : 0) - (a.local ? 1 : 0) || byText(a.name, b.name); });
+  players.forEach(function (p) { strip.appendChild(playerChip(p)); });
+  if (!players.length && g.localName) { chip(g.localName, g.alive ? g.health + " HP" : "dead"); }
   chip("Credits", g.credits);
   if (g.quota !== undefined) { chip("Quota", g.fulfilled + " / " + g.quota); chip("Days left", g.daysLeft); }
   chip("Host", g.isHost ? "yes" : "no");
   if (state.settings && state.settings.b_StealthMode) { chip("Stealth", "on"); }
+}
+
+function playerChip(p) {
+  var parts = [el("b", { text: p.name })];
+  if (p.dead) {
+    parts.push(el("span", { text: "Dead" }));
+  } else {
+    parts.push(el("span", { class: "hp" + (p.health < 40 ? " low" : ""), text: p.health + " HP" }));
+    parts.push(" | " + (p.inside ? "Inside" : "Outside"));
+    if (p.item) { parts.push(el("span", { class: "pchip-item", text: p.item })); }
+  }
+  return el("span", { class: "chip pchip" + (p.local ? " me" : "") + (p.dead ? " dead" : ""), title: p.local ? "You" : "" }, parts);
 }
 
 // Camera-style hacks that only make sense on other players (same rule as the in-game menu).
@@ -955,7 +980,7 @@ function renderPlayers(players) {
     box.appendChild(el("div", { class: "entity" + (p.dead ? " dead" : "") }, [
       el("div", { class: "entity-head" }, [
         el("span", { class: "entity-name", text: p.name + (p.local ? " (you)" : "") }),
-        el("span", { class: "entity-meta", text: p.dead ? "dead" : p.health + " HP" + (p.inside ? " | inside" : "") })
+        el("span", { class: "entity-meta", text: p.dead ? "dead" : p.health + " HP" + (p.inside ? " | inside" : " | outside") + (p.item ? " | " + p.item : "") })
       ]),
       el("div", { class: "entity-actions" }, buttons)
     ]));
@@ -1005,6 +1030,231 @@ function renderEnemies(enemies) {
   });
 }
 
+// ---------- map ----------
+// There are no pictures of the facility to download (it's built at random every day), so the game draws the
+// map itself from the floor monsters walk on and sends it once per landing (devices/{id}/map). The dots
+// (players, monsters, ship) come with the live state twice a second.
+var mapData = null;
+var mapImages = {};
+var mapUi = null;
+var mapMode = loadPref("mapMode") || "auto"; // auto = show wherever you are; or "outside" / "inside"
+var mapZoom = 1;
+var mapPan = { x: 0, y: 0 }; // in map cells, from the centre (dragging the map)
+
+function setMapData(data) {
+  mapData = data;
+  mapImages = {};
+  mapPan = { x: 0, y: 0 };
+  drawMap();
+}
+
+// The grid comes as run-length text: a letter (a = no floor, b-e = floor, low to high) and how many in a row.
+function decodeGrid(g) {
+  var out = new Uint8Array(g.w * g.h);
+  var re = /([a-e])(\d+)/g;
+  var m;
+  var i = 0;
+  while ((m = re.exec(g.data)) !== null) {
+    var value = m[1].charCodeAt(0) - 97;
+    var count = Number(m[2]);
+    if (value) { out.fill(value, i, Math.min(i + count, out.length)); }
+    i += count;
+  }
+  return out;
+}
+
+var FLOOR_SHADES = [null, [52, 58, 68], [66, 74, 86], [82, 92, 106], [100, 111, 128]];
+var WALL_SHADE = [176, 186, 200];
+
+// Turns one grid into a small picture (one pixel per cell); walls are the floor cells next to empty ones.
+function floorImage(which) {
+  if (mapImages[which]) { return mapImages[which]; }
+  var g = mapData && mapData[which];
+  if (!g || !g.data || !g.w || !g.h) { return null; }
+  var cells = decodeGrid(g);
+  var w = g.w;
+  var h = g.h;
+  var canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  var ctx = canvas.getContext("2d");
+  var img = ctx.createImageData(w, h);
+  for (var z = 0; z < h; z++) {
+    for (var x = 0; x < w; x++) {
+      var v = cells[z * w + x];
+      if (!v) { continue; }
+      var edge = x === 0 || z === 0 || x === w - 1 || z === h - 1 ||
+        !cells[z * w + x - 1] || !cells[z * w + x + 1] || !cells[(z - 1) * w + x] || !cells[(z + 1) * w + x];
+      var shade = edge ? WALL_SHADE : FLOOR_SHADES[v];
+      var p = ((h - 1 - z) * w + x) * 4; // grid row 0 is south; picture row 0 is the top
+      img.data[p] = shade[0];
+      img.data[p + 1] = shade[1];
+      img.data[p + 2] = shade[2];
+      img.data[p + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  mapImages[which] = { canvas: canvas, grid: g };
+  return mapImages[which];
+}
+
+function legendItem(color, text) {
+  return el("span", {}, [el("i", { style: "background:" + color }), text]);
+}
+
+function buildMap(content) {
+  var bar = el("div", { class: "map-bar" });
+  var buttons = {};
+  [["auto", "Follow me"], ["outside", "Outside"], ["inside", "Inside"]].forEach(function (b) {
+    buttons[b[0]] = bar.appendChild(el("button", {
+      class: "btn small", type: "button", text: b[1],
+      onclick: function () { mapMode = b[0]; savePref("mapMode", b[0]); mapPan = { x: 0, y: 0 }; drawMap(); }
+    }));
+  });
+  bar.appendChild(el("button", { class: "btn small", type: "button", text: "Zoom out", onclick: function () { zoomMap(1 / 1.5); } }));
+  bar.appendChild(el("button", { class: "btn small", type: "button", text: "Zoom in", onclick: function () { zoomMap(1.5); } }));
+  var info = bar.appendChild(el("span", { class: "map-info" }));
+  var canvas = el("canvas", { "aria-label": "Map" });
+  var empty = el("div", { class: "map-empty" });
+  var wrap = el("div", { class: "map-wrap" }, [canvas, empty]);
+  content.appendChild(bar);
+  content.appendChild(wrap);
+  content.appendChild(el("div", { class: "map-legend" }, [
+    legendItem("#3cb371", "You"), legendItem("#4a90d9", "Players"), legendItem("#8a8a8a", "Dead"),
+    legendItem("#e5534b", "Monsters"), legendItem("#e0b341", "Ship"), legendItem("#ff8c1a", "Doors")
+  ]));
+  mapUi = { canvas: canvas, wrap: wrap, info: info, empty: empty, buttons: buttons, scale: 1 };
+  // Drag to move around; mouse wheel zooms.
+  var drag = null;
+  canvas.addEventListener("pointerdown", function (e) { drag = { x: e.clientX, y: e.clientY }; try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* old browser */ } });
+  canvas.addEventListener("pointermove", function (e) {
+    if (!drag || !mapUi) { return; }
+    mapPan.x -= (e.clientX - drag.x) / mapUi.scale;
+    mapPan.y -= (e.clientY - drag.y) / mapUi.scale;
+    drag = { x: e.clientX, y: e.clientY };
+    drawMap();
+  });
+  canvas.addEventListener("pointerup", function () { drag = null; });
+  canvas.addEventListener("pointercancel", function () { drag = null; });
+  canvas.addEventListener("wheel", function (e) {
+    if (e.deltaY > 0 && mapZoom === 1) { return; } // fully zoomed out: let the page scroll
+    e.preventDefault();
+    zoomMap(e.deltaY < 0 ? 1.25 : 1 / 1.25);
+  }, { passive: false });
+  drawMap();
+}
+
+function zoomMap(factor) {
+  mapZoom = Math.min(12, Math.max(1, mapZoom * factor));
+  if (mapZoom === 1) { mapPan = { x: 0, y: 0 }; }
+  drawMap();
+}
+
+window.addEventListener("resize", function () { drawMap(); });
+
+function drawMap() {
+  if (!mapUi || activeTab !== "Map" || !document.body.contains(mapUi.canvas)) { return; }
+  var g = (state && state.game) || {};
+  var players = (state && state.players) || [];
+  var enemies = ((state && state.enemies) || []).filter(function (e) { return !e.dead; });
+  var me = players.filter(function (p) { return p.local; })[0];
+  var which = mapMode === "auto" ? (me && me.inside ? "inside" : "outside") : mapMode;
+  Object.keys(mapUi.buttons).forEach(function (k) { mapUi.buttons[k].className = "btn small" + (k === mapMode ? " primary" : ""); });
+
+  var cssW = mapUi.wrap.clientWidth || 300;
+  var cssH = Math.round(Math.min(Math.max(window.innerHeight * 0.65, 280), cssW * 1.1));
+  var dpr = window.devicePixelRatio || 1;
+  var canvas = mapUi.canvas;
+  if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.height = cssH + "px";
+  }
+  var ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  var problem = null;
+  if (!g.inRound || g.inShipPhase || !g.landed) { problem = "Land on a moon to see the map."; }
+  else if (!mapData) { problem = "Waiting for the map from the game (it's made a few seconds after landing)."; }
+  else if (g.mapSeed !== undefined && mapData.seed !== g.mapSeed) { problem = "Waiting for this moon's map..."; }
+  var floor = problem ? null : floorImage(which);
+  if (!problem && !floor) { problem = which === "inside" ? "This moon has no inside." : "No outside map for this moon."; }
+  mapUi.empty.textContent = problem || "";
+  mapUi.empty.style.display = problem ? "" : "none";
+  mapUi.info.textContent = problem ? "" : mapData.moon + " | " + (which === "inside" ? "Inside the facility" : "Outside") + (mapMode === "auto" ? " (following you)" : "");
+  if (problem) { return; }
+
+  var grid = floor.grid;
+  var scale = Math.min(cssW / grid.w, cssH / grid.h) * mapZoom;
+  mapUi.scale = scale;
+  function toGrid(pos) { return { x: (pos[0] - grid.x0) / grid.cell, y: grid.h - (pos[1] - grid.z0) / grid.cell }; }
+  // Zoomed in: keep you in the middle (when you are on this map); otherwise the middle of the map.
+  var centre = { x: grid.w / 2, y: grid.h / 2 };
+  if (mapZoom > 1 && me && me.pos && !me.dead && (me.inside ? "inside" : "outside") === which) { centre = toGrid(me.pos); }
+  var ox = cssW / 2 - (centre.x + mapPan.x) * scale;
+  var oy = cssH / 2 - (centre.y + mapPan.y) * scale;
+  function screen(pos) { var q = toGrid(pos); return { x: ox + q.x * scale, y: oy + q.y * scale }; }
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(floor.canvas, ox, oy, grid.w * scale, grid.h * scale);
+
+  ctx.font = "11px sans-serif";
+  ctx.textAlign = "center";
+  ctx.lineJoin = "round";
+  function label(s, text, color, below) {
+    var y = below ? s.y + 17 : s.y - 10;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.strokeText(text, s.x, y);
+    ctx.fillStyle = color;
+    ctx.fillText(text, s.x, y);
+  }
+  function dot(s, r, color) {
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#000";
+    ctx.stroke();
+  }
+  var inside = which === "inside";
+  (mapData.doors || []).filter(function (d) { return !!d.inside === inside; }).forEach(function (d) {
+    var s = screen([d.x, d.z]);
+    ctx.fillStyle = "#ff8c1a";
+    ctx.fillRect(s.x - 4, s.y - 4, 8, 8);
+    label(s, d.main ? "Main entrance" : "Fire exit", "#ffb066", true);
+  });
+  if (!inside && g.ship) {
+    var ship = screen(g.ship);
+    ctx.fillStyle = "#e0b341";
+    ctx.fillRect(ship.x - 10, ship.y - 6, 20, 12);
+    label(ship, "Ship", "#e0b341", true);
+  }
+  enemies.filter(function (e) { return e.pos && !!e.inside === inside; }).forEach(function (e) {
+    var s = screen(e.pos);
+    dot(s, 5, "#e5534b");
+    label(s, e.name, "#f2a19c");
+  });
+  // Players last so they sit on top; you on top of everyone.
+  players.filter(function (p) { return p.pos && !!p.inside === inside; }).sort(function (a, b) { return (a.local ? 1 : 0) - (b.local ? 1 : 0); }).forEach(function (p) {
+    var s = screen(p.pos);
+    if (p.dead) {
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = "#8a8a8a";
+      ctx.beginPath();
+      ctx.moveTo(s.x - 5, s.y - 5); ctx.lineTo(s.x + 5, s.y + 5);
+      ctx.moveTo(s.x + 5, s.y - 5); ctx.lineTo(s.x - 5, s.y + 5);
+      ctx.stroke();
+      label(s, p.name + " (dead)", "#aaaaaa");
+    } else {
+      dot(s, p.local ? 7 : 6, p.local ? "#3cb371" : "#4a90d9");
+      label(s, p.name, p.local ? "#7be0a5" : "#9cc7f2");
+    }
+  });
+}
+
 // ---------- demo mode ----------
 if (DEMO) {
   import("./demo.js").then(function (m) {
@@ -1016,6 +1266,7 @@ if (DEMO) {
     currentDev = "demo";
     catalog = m.demo.catalog;
     state = m.demo.state;
+    mapData = m.demo.map || null;
     renderDeviceSelect();
     renderTabs();
     buildContent();
@@ -1023,7 +1274,10 @@ if (DEMO) {
     setInterval(function () { deviceInfo.demo.lastSeen = Date.now(); }, 5000);
     // Like the real thing: enemies move, so their distances change twice a second.
     setInterval(function () {
-      (state.enemies || []).forEach(function (e) { e.distance = Math.max(1, e.distance + (Math.random() < 0.5 ? -1 : 1)); });
+      (state.enemies || []).forEach(function (e) {
+        e.distance = Math.max(1, e.distance + (Math.random() < 0.5 ? -1 : 1));
+        if (e.pos) { e.pos = [e.pos[0] + (Math.random() - 0.5) * 2, e.pos[1] + (Math.random() - 0.5) * 2]; }
+      });
       applyState();
       renderDeviceSelect();
     }, 500);

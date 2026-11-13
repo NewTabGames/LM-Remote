@@ -100,5 +100,59 @@ demo.state.settings.b_StealthMode = false;
 });
 demo.catalog.hacks.X_StealItems.only = "HoarderBugAI";
 demo.catalog.hacks.AggroHunt.only = "MouthDogAI";
-demo.catalog.hacks.X_TargetPlayer = { name: "Target Player (anger at)", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };
+// Hunt With All: every monster walks to the chosen player.
+demo.catalog.hacks.HuntWithAll = { name: "Hunt With All", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Player", kind: "player" }] };
+
+// Sample map (the real one is drawn by the game from its walkable floor).
+function encode(cells) {
+  var out = "";
+  var run = cells[0];
+  var count = 0;
+  for (var i = 0; i < cells.length; i++) {
+    if (cells[i] === run) { count++; continue; }
+    out += String.fromCharCode(97 + run) + count;
+    run = cells[i];
+    count = 1;
+  }
+  return out + String.fromCharCode(97 + run) + count;
+}
+function grid(x0, z0, cell, w, h, paint) {
+  var cells = new Array(w * h).fill(0);
+  paint(function (ax, az, bx, bz, v) {
+    for (var z = az; z < bz; z++) { for (var x = ax; x < bx; x++) { if (x >= 0 && z >= 0 && x < w && z < h) { cells[z * w + x] = v; } } }
+  }, cells, w, h);
+  return { x0: x0, z0: z0, cell: cell, w: w, h: h, data: encode(cells) };
+}
+demo.map = {
+  moon: "41 Experimentation", seed: 1234,
+  inside: grid(-100, -80, 1.5, 140, 110, function (rect) {
+    rect(10, 10, 40, 30, 2); rect(40, 18, 70, 22, 2); rect(70, 8, 95, 40, 2); rect(80, 40, 84, 70, 1); rect(60, 70, 110, 95, 1);
+    rect(20, 30, 24, 75, 2); rect(10, 75, 50, 100, 3); rect(50, 85, 60, 89, 3); rect(110, 80, 130, 84, 1); rect(118, 50, 136, 80, 4);
+  }),
+  outside: grid(-250, -200, 2.5, 200, 170, function (rect, cells, w, h) {
+    for (var z = 0; z < h; z++) {
+      for (var x = 0; x < w; x++) {
+        var dx = (x - 100) / 90;
+        var dz = (z - 85) / 75;
+        var r = 1 + 0.18 * Math.sin(x / 9) + 0.15 * Math.cos(z / 7);
+        if (dx * dx + dz * dz < r * 0.8) { cells[z * w + x] = 1 + Math.min(3, Math.floor(((Math.sin(x / 20) + Math.cos(z / 25)) + 2) * 1.0)); }
+      }
+    }
+    rect(60, 60, 75, 66, 0); rect(120, 100, 128, 130, 0);
+  }),
+  doors: [
+    { x: -40, z: 20, inside: false, main: true }, { x: 60, z: -70, inside: false, main: false },
+    { x: -82, z: -62, inside: true, main: true }, { x: 95, z: 40, inside: true, main: false }
+  ]
+};
+demo.state.game.mapSeed = 1234;
+demo.state.game.ship = [10, -20];
+demo.state.players[0].pos = [-60, -40]; demo.state.players[0].item = "Shovel";
+demo.state.players[1].pos = [-10, -48]; demo.state.players[1].item = "Flashlight";
+demo.state.players[2].pos = [30, -10];
+demo.state.enemies[0].pos = [-55, -28];
+demo.state.enemies[1].pos = [20, 50];
+demo.state.enemies[2].pos = [-120, 60];
+
+demo.catalog.hacks.X_TargetPlayer ={ name: "Target Player (anger at)", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };
 demo.catalog.hacks.X_KillPlayerWithEnemy = { name: "Kill Player With Enemy", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };

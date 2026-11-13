@@ -81,3 +81,14 @@ demo.state.targets = demo.state.targets || {};
 demo.state.targets.hunts = [{ enemy: 1, enemyName: "Bracken", player: "Friend" }];
 if (demo.catalog.hacks.KillNearbyEnemies) { demo.catalog.hacks.KillNearbyEnemies.slider = { setting: "f_enemyKillDistance", min: 5, max: 50, step: 1 }; }
 demo.state.settings.f_enemyKillDistance = 15;
+
+// Sample in-game tools (the real lists come from the game once a lobby is loaded).
+demo.catalog.hacks.X_SpawnEnemy = { name: "Spawn Enemy (host)", category: "Enemies", group: "Enemy spawner", toggle: false, action: true,
+  args: [{ name: "Enemy", kind: "enum", options: ["Blob", "Flowerman", "Hoarding bug", "Jester", "Masked", "Thumper"] }, { name: "Amount", kind: "number", integer: true, optional: true, hint: "1" }, { name: "Outside", kind: "bool" }] };
+demo.catalog.hacks.X_KillEnemy = { name: "Kill Enemy", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }] };
+demo.catalog.hacks.X_StunEnemy = { name: "Stun Enemy", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }] };
+demo.catalog.hacks.X_StealItems = { name: "Steal Items Enemy", category: "Enemies", group: "Enemies", only: "Hoarding bug", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }] };
+demo.catalog.hacks.X_SpawnItem = { name: "Spawn Item (host)", category: "Server", group: "Spawning (host)", toggle: false, action: true,
+  args: [{ name: "Item", kind: "enum", options: [] }, { name: "Amount", kind: "number", integer: true, optional: true, hint: "1" }, { name: "Scrap Value", kind: "number", integer: true, optional: true, hint: "random" }] };
+demo.catalog.hacks.AggroHunt = { name: "Aggro Hunt", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };
+demo.catalog.hacks.PersistentHunt = { name: "Persistent Hunt", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };

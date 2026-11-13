@@ -39,7 +39,7 @@ var ui = freshUi();
 var pendingToggles = {};
 
 function freshUi() {
-  return { toggles: {}, rows: {}, sliders: {}, playerSelects: [], enemySelects: [], settings: {}, playersBox: null, enemiesBox: null, sigPlayers: "", sigEnemies: "" };
+  return { toggles: {}, rows: {}, sliders: {}, enemyMeta: {}, playerSelects: [], enemySelects: [], settings: {}, playersBox: null, enemiesBox: null, sigPlayers: "", sigEnemies: "" };
 }
 
 // ---------- helpers ----------
@@ -263,12 +263,11 @@ function deviceLabel(id) {
 
 function renderDeviceSelect() {
   var select = $("device-select");
-  select.innerHTML = "";
-  var ids = Object.keys(deviceIndex).sort(function (a, b) { return byText(deviceLabel(a), deviceLabel(b)); });
-  ids.forEach(function (id) {
-    select.appendChild(el("option", { value: id, text: deviceLabel(id), selected: id === currentDev }));
-  });
-  if (!ids.length) { select.appendChild(el("option", { value: "", text: "No PCs yet" })); }
+  // This runs every few seconds (each PC's "last seen" time); only reword the list, don't rebuild it.
+  var ids = Object.keys(deviceIndex).sort(function (a, b) { return byText(deviceLabel(a).replace(/ \((online|offline)\)$/, ""), deviceLabel(b).replace(/ \((online|offline)\)$/, "")) || (a < b ? -1 : 1); });
+  var wanted = ids.map(function (id) { return { value: id, text: deviceLabel(id) }; });
+  if (!ids.length) { wanted = [{ value: "", text: "No PCs yet" }]; }
+  syncOptions(select, wanted, currentDev || "");
   select.disabled = ids.length < 2;
   $("no-device").classList.toggle("hidden", ids.length > 0);
   $("device-view").classList.toggle("hidden", !currentDev);
@@ -418,7 +417,7 @@ function hackEntries() {
     var h = hacks[key];
     return {
       key: key, name: h.name || key, category: h.category || "Other", group: h.group || h.category || "Other",
-      toggle: !!h.toggle, action: !!h.action, args: h.args || [], slider: h.slider || null
+      toggle: !!h.toggle, action: !!h.action, args: h.args || [], slider: h.slider || null, only: h.only || null
     };
   }).sort(function (a, b) { return byText(a.name, b.name); });
 }
@@ -556,6 +555,7 @@ function hackRow(h) {
         var values = [];
         for (var i = 0; i < getters.length; i++) {
           var value = getters[i]();
+          if (value === undefined && h.args[i].optional) { values.push(null); continue; } // left empty on purpose
           if (value === undefined) { toast((h.args[i].kind === "enemy" || h.args[i].kind === "player" ? "Pick " : "Fill in ") + argName(h.args[i]).toLowerCase(), "fail"); return; }
           values.push(value);
         }
@@ -610,8 +610,10 @@ function argControl(arg, box) {
   if (arg.kind === "enum") {
     var enumSelect = el("select");
     (arg.options || []).forEach(function (o) { enumSelect.appendChild(el("option", { value: o, text: o })); });
+    // Lists like enemy types and items only exist once the game has a lobby loaded.
+    if (!(arg.options || []).length) { enumSelect.appendChild(el("option", { value: "", text: "Nothing yet (join a lobby first)" })); }
     label.appendChild(enumSelect);
-    return function () { return enumSelect.value; };
+    return function () { return enumSelect.value === "" ? undefined : enumSelect.value; };
   }
   if (arg.kind === "bool") {
     var check = el("input", { type: "checkbox" });
@@ -636,7 +638,7 @@ function argControl(arg, box) {
     };
   }
   if (arg.kind === "number") {
-    var num = el("input", { type: "number", step: arg.integer ? "1" : "any", inputmode: arg.integer ? "numeric" : "decimal" });
+    var num = el("input", { type: "number", step: arg.integer ? "1" : "any", inputmode: arg.integer ? "numeric" : "decimal", placeholder: arg.hint || undefined });
     label.appendChild(num);
     return function () {
       var v = arg.integer ? parseInt(num.value, 10) : parseFloat(num.value);
@@ -716,31 +718,63 @@ function applyState(force) {
   var players = state.players || [];
   var enemies = (state.enemies || []).filter(function (e) { return !e.dead; });
   var sigP = JSON.stringify([players, state.targets || null]);
-  var sigE = JSON.stringify(enemies.map(function (e) { return [e.id, e.name, e.distance]; }));
+  // Which enemies exist (not how far away they are): the cards are only rebuilt when this changes.
+  var sigE = JSON.stringify(enemies.map(function (e) { return [e.id, e.name]; }));
+  fillSelects(ui.playerSelects, players.map(function (p) {
+    return { value: p.id, name: p.name, text: p.name + (p.local ? " (you)" : "") + (p.dead ? " (dead)" : "") };
+  }), "No players (join a lobby first)");
+  fillSelects(ui.enemySelects, enemies.map(function (e) {
+    return { value: e.id, name: e.name, text: e.name + " (" + e.distance + "m" + (e.inside ? ", inside" : "") + ")" };
+  }), "No living enemies right now");
   if (force || sigP !== ui.sigPlayers) {
     ui.sigPlayers = sigP;
-    fillSelects(ui.playerSelects, players.map(function (p) {
-      return { value: p.id, text: p.name + (p.local ? " (you)" : "") + (p.dead ? " (dead)" : "") };
-    }), "No players (join a lobby first)");
     renderPlayers(players);
   }
   if (force || sigE !== ui.sigEnemies) {
     ui.sigEnemies = sigE;
-    fillSelects(ui.enemySelects, enemies.map(function (e) {
-      return { value: e.id, text: e.name + " (" + e.distance + "m" + (e.inside ? ", inside" : "") + ")" };
-    }), "No living enemies right now");
     renderEnemies(enemies);
+  } else {
+    // Same enemies as before: just refresh each card's distance text, so buttons don't blink under your finger.
+    enemies.forEach(function (e) {
+      var meta = ui.enemyMeta[e.id];
+      var text = enemyMetaText(e);
+      if (meta && meta.textContent !== text) { meta.textContent = text; }
+    });
   }
 }
 
-function fillSelects(selects, options, emptyText) {
-  selects.forEach(function (select) {
-    var previous = select.value;
+// Brings a dropdown's choices up to date WITHOUT rebuilding it when it doesn't have to. Rebuilding a dropdown
+// while its list is open makes the browser close and reopen it (the flicker), and live data arrives twice a
+// second. So: never touch one that is in use, and when only the wording changed (an enemy's distance, a PC going
+// online) just reword the existing choices.
+function syncOptions(select, wanted, keepValue) {
+  if (document.activeElement === select) { return; } // open or focused: leave it alone, the next update catches up
+  var i;
+  var same = select.options.length === wanted.length;
+  for (i = 0; same && i < wanted.length; i++) {
+    if (select.options[i].value !== wanted[i].value) { same = false; }
+  }
+  if (same) {
+    for (i = 0; i < wanted.length; i++) {
+      if (select.options[i].text !== wanted[i].text) { select.options[i].text = wanted[i].text; }
+    }
+  } else {
+    var previous = keepValue === undefined ? select.value : keepValue;
     select.innerHTML = "";
-    if (!options.length) { select.appendChild(el("option", { value: "", text: emptyText })); return; }
-    options.slice().sort(function (a, b) { return byText(a.text, b.text); }).forEach(function (o) { select.appendChild(el("option", { value: String(o.value), text: o.text })); });
-    if (previous && options.some(function (o) { return String(o.value) === previous; })) { select.value = previous; }
-  });
+    wanted.forEach(function (o) { select.appendChild(el("option", { value: o.value, text: o.text })); });
+    if (previous !== "" && wanted.some(function (o) { return o.value === previous; })) { select.value = previous; }
+  }
+  if (keepValue !== undefined && select.value !== keepValue && wanted.some(function (o) { return o.value === keepValue; })) { select.value = keepValue; }
+}
+
+// options: [{ value, text, name }]. Listed A-Z by name (then by id), so the order doesn't jump around as the
+// distance or health shown in the text changes.
+function fillSelects(selects, options, emptyText) {
+  var wanted = options.slice().sort(function (a, b) {
+    return byText(a.name === undefined ? a.text : a.name, b.name === undefined ? b.text : b.name) || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0);
+  }).map(function (o) { return { value: String(o.value), text: o.text }; });
+  if (!wanted.length) { wanted = [{ value: "", text: emptyText }]; }
+  selects.forEach(function (select) { syncOptions(select, wanted); });
 }
 
 function renderStrip() {
@@ -804,6 +838,8 @@ function renderRunningBar() {
   // Rebuild only when something shown here changed, so an open dropdown is not closed by live updates.
   var sig = JSON.stringify([targets, !!toggles.FreeCam, players.map(function (p) { return [p.id, p.clientId, p.name, p.dead, p.local]; })]);
   if (sig === runningBarSig) { return; }
+  // The target picker lives in this bar: don't rebuild the bar while it is open (the next update will).
+  if (document.activeElement && document.activeElement.tagName === "SELECT" && bar.contains(document.activeElement)) { return; }
   runningBarSig = sig;
   bar.innerHTML = "";
   var stops = [];
@@ -832,7 +868,7 @@ function renderRunningBar() {
   if (targets.miniCam >= 0) { stop("Stop mini cam (" + nameOfClient(players, targets.miniCam) + ")", { type: "toggle", hack: "MiniCam", value: false }); }
   // Monsters walking to a player with Hunt Player.
   targets.hunts.forEach(function (h) {
-    stop("Stop " + h.enemyName + " walking to " + h.player, { type: "stopHunt", enemy: h.enemy });
+    stop("Stop " + h.enemyName + (h.persistent ? " hunting " : " walking to ") + h.player, { type: "stopHunt", enemy: h.enemy });
   });
   if (toggles.FreeCam && !targets.controlling) { stop("Stop free cam", { type: "toggle", hack: "FreeCam", value: false }); }
   bar.classList.toggle("hidden", stops.length === 0);
@@ -865,17 +901,21 @@ function renderPlayers(players) {
   });
 }
 
+function enemyMetaText(e) { return e.distance + "m" + (e.inside ? " | inside" : " | outside"); }
+
 function renderEnemies(enemies) {
   var box = ui.enemiesBox;
+  ui.enemyMeta = {};
   if (!box) { return; }
   box.innerHTML = "";
   if (!enemies.length) { box.appendChild(el("div", { class: "empty-list", text: "No living enemies right now." })); return; }
   function enemyLabel(h) { return h.name.replace(/\s*Enemy\s*/g, " ").trim() || h.name; }
   var actions = hackEntries().filter(function (h) { return isSingleArg(h, "enemy"); })
     .sort(function (a, b) { return byText(enemyLabel(a), enemyLabel(b)); });
-  // A-Z by name; several of the same kind are listed nearest first.
-  enemies.slice().sort(function (a, b) { return byText(a.name, b.name) || a.distance - b.distance; }).forEach(function (e) {
-    var buttons = actions.map(function (h) {
+  // A-Z by name; several of the same kind keep a fixed order so the cards don't swap places as they move.
+  enemies.slice().sort(function (a, b) { return byText(a.name, b.name) || a.id - b.id; }).forEach(function (e) {
+    // Some actions only fit one kind of monster (webs for the Bunker Spider, stealing for the Hoarding Bug).
+    var buttons = actions.filter(function (h) { return !h.only || h.only === e.name; }).map(function (h) {
       return el("button", {
         class: "btn small", type: "button", text: enemyLabel(h),
         onclick: function () { send({ type: "run", hack: h.key, args: [e.id] }); }
@@ -884,7 +924,7 @@ function renderEnemies(enemies) {
     box.appendChild(el("div", { class: "entity" }, [
       el("div", { class: "entity-head" }, [
         el("span", { class: "entity-name", text: e.name }),
-        el("span", { class: "entity-meta", text: e.distance + "m" + (e.inside ? " | inside" : " | outside") })
+        (ui.enemyMeta[e.id] = el("span", { class: "entity-meta", text: enemyMetaText(e) }))
       ]),
       el("div", { class: "entity-actions" }, buttons)
     ]));
@@ -907,5 +947,11 @@ if (DEMO) {
     buildContent();
     refreshOnline();
     setInterval(function () { deviceInfo.demo.lastSeen = Date.now(); }, 5000);
+    // Like the real thing: enemies move, so their distances change twice a second.
+    setInterval(function () {
+      (state.enemies || []).forEach(function (e) { e.distance = Math.max(1, e.distance + (Math.random() < 0.5 ? -1 : 1)); });
+      applyState();
+      renderDeviceSelect();
+    }, 500);
   });
 }

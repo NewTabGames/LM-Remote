@@ -94,3 +94,11 @@ demo.catalog.hacks.AggroHunt = { name: "Aggro Hunt", category: "Enemies", group:
 demo.catalog.hacks.PersistentHunt = { name: "Persistent Hunt", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };
 demo.catalog.settings.b_StealthMode = { name: "Stealth Mode", type: "bool" };
 demo.state.settings.b_StealthMode = false;
+// Monster types, so monster-specific buttons can be matched (the real game sends these).
+(demo.state.enemies || []).forEach(function (e) {
+  e.type = e.name === "Hoarding bug" ? "HoarderBugAI" : e.name === "Eyeless dog" ? "MouthDogAI" : e.name === "Bracken" ? "FlowermanAI" : "EnemyAI";
+});
+demo.catalog.hacks.X_StealItems.only = "HoarderBugAI";
+demo.catalog.hacks.AggroHunt.only = "MouthDogAI";
+demo.catalog.hacks.X_TargetPlayer = { name: "Target Player (anger at)", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };
+demo.catalog.hacks.X_KillPlayerWithEnemy = { name: "Kill Player With Enemy", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };

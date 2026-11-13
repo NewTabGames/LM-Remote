@@ -39,7 +39,7 @@ var ui = freshUi();
 var pendingToggles = {};
 
 function freshUi() {
-  return { toggles: {}, rows: {}, sliders: {}, enemyMeta: {}, playerSelects: [], enemySelects: [], settings: {}, playersBox: null, enemiesBox: null, sigPlayers: "", sigEnemies: "" };
+  return { toggles: {}, rows: {}, sliders: {}, enemyMeta: {}, enemyPlayerSelect: null, playerSelects: [], enemySelects: [], settings: {}, playersBox: null, enemiesBox: null, sigPlayers: "", sigEnemies: "" };
 }
 
 // ---------- helpers ----------
@@ -433,6 +433,26 @@ function settingEntries() {
 
 function isSingleArg(h, kind) { return h.action && h.args.length === 1 && h.args[0].kind === kind; }
 
+// Needs exactly one enemy and one player (Hunt, Teleport Enemy...). On the Enemies tab these are buttons on
+// each enemy's card, using the player picked once at the top, instead of a row with two dropdowns each.
+function isEnemyPlayerPair(h) {
+  if (!h.action || h.toggle || h.args.length !== 2) { return false; }
+  var kinds = h.args.map(function (a) { return a.kind; }).sort().join(",");
+  return kinds === "enemy,player";
+}
+
+// Short button names for the enemy cards.
+var ENEMY_BUTTON_NAMES = {
+  HuntPlayer: "Hunt", PersistentHunt: "Persistent hunt", AggroHunt: "Aggro hunt", TeleportEnemy: "Teleport to player",
+  X_TargetPlayer: "Anger at player", X_KillPlayerWithEnemy: "Kill player"
+};
+function enemyButtonName(h) { return ENEMY_BUTTON_NAMES[h.key] || h.name.replace(/\s*Enemy\s*/g, " ").trim() || h.name; }
+
+// Does this action fit this enemy? Some only make sense for one monster (matched by its type, or its name).
+function fitsEnemy(h, e) { return !h.only || h.only === e.type || h.only === e.name; }
+
+var enemyTabPlayer = loadPref("enemyPlayer") || "";
+
 function renderTabs() {
   var tabs = $("tabs");
   tabs.innerHTML = "";
@@ -469,6 +489,12 @@ function buildContent() {
     }
     if (activeTab === "Enemies" && !search) {
       content.appendChild(el("div", { class: "section-title", text: "Enemies" }));
+      // One player picker for every enemy's Hunt / Anger / Teleport buttons.
+      var pick = el("select", { "aria-label": "Player" });
+      pick.addEventListener("change", function () { enemyTabPlayer = pick.value; savePref("enemyPlayer", pick.value); });
+      ui.playerSelects.push(pick);
+      ui.enemyPlayerSelect = pick;
+      content.appendChild(el("div", { class: "pick-bar" }, [el("span", { class: "pick-label", text: "Player for the hunt / anger / teleport buttons:" }), pick]));
       ui.enemiesBox = content.appendChild(el("div", { class: "cards" }));
     }
     var list = hackEntries().filter(function (h) {
@@ -476,7 +502,9 @@ function buildContent() {
       if (h.category !== activeTab) { return false; }
       // Single-target hacks are shown as buttons on the player/enemy cards instead.
       if (activeTab === "Players" && !search && isSingleArg(h, "player") && !h.toggle) { return false; }
-      if (activeTab === "Enemies" && !search && isSingleArg(h, "enemy") && !h.toggle) { return false; }
+      // On the Enemies tab everything aimed at one enemy lives on that enemy's card: single-enemy actions
+      // (Enemy Control included; "Running now" has its Stop button) and enemy+player ones.
+      if (activeTab === "Enemies" && !search && (isSingleArg(h, "enemy") || isEnemyPlayerPair(h))) { return false; }
       return true;
     });
     if (list.length) {
@@ -493,6 +521,17 @@ function buildContent() {
     }
   }
   applyState(true);
+  if (ui.enemyPlayerSelect) {
+    // Keep the player you picked last time; otherwise start on the first living player who isn't you.
+    var ps = ui.enemyPlayerSelect;
+    var has = function (v) { return v !== "" && Array.prototype.some.call(ps.options, function (o) { return o.value === v; }); };
+    if (has(enemyTabPlayer)) { ps.value = enemyTabPlayer; }
+    else {
+      var other = ((state && state.players) || []).filter(function (p) { return !p.local && !p.dead; }).sort(function (a, b) { return byText(a.name, b.name); })[0];
+      if (other && has(String(other.id))) { ps.value = String(other.id); }
+      enemyTabPlayer = ps.value;
+    }
+  }
 }
 
 function groupBox(title, rows) {
@@ -547,7 +586,9 @@ function hackRow(h) {
       }
       getters.push(argControl(arg, argsBox));
     });
-    argsBox.appendChild(el("button", {
+    // When the slider is the only input, Run sits right next to it instead of on a line of its own.
+    var runHolder = (sliderIsArg && h.args.length === 1 && row.querySelector(".row-slider")) || argsBox;
+    runHolder.appendChild(el("button", {
       class: "btn primary small run",
       type: "button",
       text: h.toggle ? "Start" : "Run",
@@ -562,7 +603,7 @@ function hackRow(h) {
         send({ type: "run", hack: h.key, args: values });
       }
     }));
-    row.appendChild(argsBox);
+    if (runHolder === argsBox) { row.appendChild(argsBox); }
   }
   return row;
 }
@@ -616,6 +657,7 @@ function argControl(arg, box) {
     return function () { return enumSelect.value === "" ? undefined : enumSelect.value; };
   }
   if (arg.kind === "bool") {
+    label.className = "arg bool";
     var check = el("input", { type: "checkbox" });
     label.appendChild(el("label", { class: "switch" }, [check, el("span", { class: "track" })]));
     return function () { return check.checked; };
@@ -638,6 +680,7 @@ function argControl(arg, box) {
     };
   }
   if (arg.kind === "number") {
+    label.className = "arg num";
     var num = el("input", { type: "number", step: arg.integer ? "1" : "any", inputmode: arg.integer ? "numeric" : "decimal", placeholder: arg.hint || undefined });
     label.appendChild(num);
     return function () {
@@ -927,16 +970,27 @@ function renderEnemies(enemies) {
   if (!box) { return; }
   box.innerHTML = "";
   if (!enemies.length) { box.appendChild(el("div", { class: "empty-list", text: "No living enemies right now." })); return; }
-  function enemyLabel(h) { return h.name.replace(/\s*Enemy\s*/g, " ").trim() || h.name; }
-  var actions = hackEntries().filter(function (h) { return isSingleArg(h, "enemy"); })
-    .sort(function (a, b) { return byText(enemyLabel(a), enemyLabel(b)); });
+  var byName = function (a, b) { return byText(enemyButtonName(a), enemyButtonName(b)); };
+  var actions = hackEntries().filter(function (h) { return isSingleArg(h, "enemy"); }).sort(byName);
+  var pairActions = hackEntries().filter(isEnemyPlayerPair).sort(byName);
   // A-Z by name; several of the same kind keep a fixed order so the cards don't swap places as they move.
   enemies.slice().sort(function (a, b) { return byText(a.name, b.name) || a.id - b.id; }).forEach(function (e) {
     // Some actions only fit one kind of monster (webs for the Bunker Spider, stealing for the Hoarding Bug).
-    var buttons = actions.filter(function (h) { return !h.only || h.only === e.name; }).map(function (h) {
+    var buttons = actions.filter(function (h) { return fitsEnemy(h, e); }).map(function (h) {
       return el("button", {
-        class: "btn small", type: "button", text: enemyLabel(h),
+        class: "btn small", type: "button", text: enemyButtonName(h),
         onclick: function () { send({ type: "run", hack: h.key, args: [e.id] }); }
+      });
+    });
+    // Actions that also need a player use the one picked at the top of the tab.
+    var pairButtons = pairActions.filter(function (h) { return fitsEnemy(h, e); }).map(function (h) {
+      return el("button", {
+        class: "btn small", type: "button", text: enemyButtonName(h),
+        onclick: function () {
+          var chosen = ui.enemyPlayerSelect ? ui.enemyPlayerSelect.value : "";
+          if (chosen === "") { toast("Pick a player at the top of the Enemies tab first", "fail"); return; }
+          send({ type: "run", hack: h.key, args: h.args.map(function (a) { return a.kind === "enemy" ? e.id : Number(chosen); }) });
+        }
       });
     });
     box.appendChild(el("div", { class: "entity" }, [
@@ -944,7 +998,9 @@ function renderEnemies(enemies) {
         el("span", { class: "entity-name", text: e.name }),
         (ui.enemyMeta[e.id] = el("span", { class: "entity-meta", text: enemyMetaText(e) }))
       ]),
-      el("div", { class: "entity-actions" }, buttons)
+      el("div", { class: "entity-actions" }, buttons),
+      pairButtons.length ? el("div", { class: "entity-sub", text: "With the chosen player" }) : null,
+      pairButtons.length ? el("div", { class: "entity-actions" }, pairButtons) : null
     ]));
   });
 }

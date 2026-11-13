@@ -229,3 +229,17 @@ input:focus, select:focus { border-color: var(--accent); }
   .note { margin: 0 10px 8px; }
   .footer { padding: 12px 10px; }
 }
+
+/* Inputs inside a feature row: a short number box, and an on/off switch the same height as the boxes.
+   (Without this the switch's 60px width was applied as its height inside the column, making a tall box.) */
+.arg.num { flex: 0 1 110px; }
+.arg.bool { flex: 0 0 auto; }
+.arg .switch { flex: none; width: 64px; height: var(--tap); margin-top: 3px; }
+.arg .switch .track { line-height: 42px; }
+.row-slider .run { margin: 0 0 0 10px; flex: 0 0 auto; }
+
+/* Enemies tab: the one player picker, and the second row of buttons on each card */
+.pick-bar { display: flex; flex-wrap: wrap; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; margin-bottom: 8px; }
+.pick-label { color: var(--muted); font-size: 13px; margin: 2px 10px 2px 0; }
+.pick-bar select { flex: 1 1 180px; max-width: 320px; min-width: 0; }
+.entity-sub { padding: 6px 10px 0; margin-top: 2px; border-top: 1px solid var(--line-2); font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }

@@ -815,9 +815,10 @@ function renderRunningBar() {
     stop("Stop controlling " + targets.controlling, { type: "toggle", hack: "EnemyControl", value: false });
     // Who the controlled monster goes after (T in game), and who drives it (F9 in game).
     var pick = el("select", { "aria-label": "Attack target" });
-    pick.appendChild(el("option", { value: "-1", text: "Target: nearest player" }));
-    players.filter(function (p) { return !p.local && !p.dead; }).sort(function (a, b) { return byText(a.name, b.name); }).forEach(function (p) {
-      pick.appendChild(el("option", { value: String(p.id), text: "Target: " + p.name, selected: p.clientId === targets.controlTarget }));
+    pick.appendChild(el("option", { value: "-1", text: "Target: nearest other player" }));
+    // Other players A-Z, then your own body last (only picked on purpose).
+    players.filter(function (p) { return !p.dead; }).sort(function (a, b) { return (a.local ? 1 : 0) - (b.local ? 1 : 0) || byText(a.name, b.name); }).forEach(function (p) {
+      pick.appendChild(el("option", { value: String(p.id), text: "Target: " + (p.local ? "yourself (" + p.name + ")" : p.name), selected: p.clientId === targets.controlTarget }));
     });
     pick.addEventListener("change", function () { send({ type: "controlTarget", player: Number(pick.value) }); });
     controlExtras.push(pick);

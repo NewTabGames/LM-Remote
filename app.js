@@ -291,7 +291,7 @@ $("btn-pair").addEventListener("click", function () { pairDevice(); });
 function pairDevice() {
   var code = $("pair-code").value.toUpperCase().replace(/[^A-Z0-9]/g, "");
   $("pair-error").textContent = "";
-  if (code.length !== 6) { $("pair-error").textContent = "The code is 6 characters, shown in the in-game menu."; return; }
+  if (code.length < 6 || code.length > 10) { $("pair-error").textContent = "The code is 8 characters, shown in the in-game menu."; return; }
   if (DEMO) { toast("Demo: would pair code " + code, "ok"); return; }
   $("btn-pair").disabled = true;
   get(ref(db, "pairCodes/" + code)).then(function (snap) {

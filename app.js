@@ -1037,14 +1037,17 @@ function renderEnemies(enemies) {
 var mapData = null;
 var mapImages = {};
 var mapUi = null;
-var mapMode = loadPref("mapMode") || "auto"; // auto = show wherever you are; or "outside" / "inside"
+var mapMode = loadPref("mapMode") || "auto"; // auto = wherever you are; "outside", "inside", or "both" side by side
 var mapZoom = 1;
-var mapPan = { x: 0, y: 0 }; // in map cells, from the centre (dragging the map)
+var mapPans = {}; // per map ("outside"/"inside"): how far it was dragged from the centre, in map cells
+
+function resetMapPan() { mapPans = { outside: { x: 0, y: 0 }, inside: { x: 0, y: 0 } }; }
+resetMapPan();
 
 function setMapData(data) {
   mapData = data;
   mapImages = {};
-  mapPan = { x: 0, y: 0 };
+  resetMapPan();
   drawMap();
 }
 
@@ -1102,35 +1105,45 @@ function legendItem(color, text) {
   return el("span", {}, [el("i", { style: "background:" + color }), text]);
 }
 
+var MAP_MODES = [["auto", "Follow me"], ["outside", "Outside"], ["inside", "Inside"], ["both", "Both"]];
+
 function buildMap(content) {
   var bar = el("div", { class: "map-bar" });
   var buttons = {};
-  [["auto", "Follow me"], ["outside", "Outside"], ["inside", "Inside"]].forEach(function (b) {
+  MAP_MODES.forEach(function (b) {
     buttons[b[0]] = bar.appendChild(el("button", {
       class: "btn small", type: "button", text: b[1],
-      onclick: function () { mapMode = b[0]; savePref("mapMode", b[0]); mapPan = { x: 0, y: 0 }; drawMap(); }
+      onclick: function () { mapMode = b[0]; savePref("mapMode", b[0]); resetMapPan(); drawMap(); }
     }));
   });
   bar.appendChild(el("button", { class: "btn small", type: "button", text: "Zoom out", onclick: function () { zoomMap(1 / 1.5); } }));
   bar.appendChild(el("button", { class: "btn small", type: "button", text: "Zoom in", onclick: function () { zoomMap(1.5); } }));
   var info = bar.appendChild(el("span", { class: "map-info" }));
-  var canvas = el("canvas", { "aria-label": "Map" });
-  var empty = el("div", { class: "map-empty" });
-  var wrap = el("div", { class: "map-wrap" }, [canvas, empty]);
+  var box = el("div", { class: "map-panels" });
   content.appendChild(bar);
-  content.appendChild(wrap);
+  content.appendChild(box);
   content.appendChild(el("div", { class: "map-legend" }, [
     legendItem("#3cb371", "You"), legendItem("#4a90d9", "Players"), legendItem("#8a8a8a", "Dead"),
     legendItem("#e5534b", "Monsters"), legendItem("#e0b341", "Ship"), legendItem("#ff8c1a", "Doors")
   ]));
-  mapUi = { canvas: canvas, wrap: wrap, info: info, empty: empty, buttons: buttons, scale: 1 };
-  // Drag to move around; mouse wheel zooms.
+  mapUi = { box: box, panels: [], info: info, buttons: buttons };
+  drawMap();
+}
+
+// One map on screen: a canvas you can drag (each map keeps its own position) and wheel-zoom.
+function makeMapPanel() {
+  var canvas = el("canvas", { "aria-label": "Map" });
+  var empty = el("div", { class: "map-empty" });
+  var title = el("div", { class: "map-panel-title" });
+  var wrap = el("div", { class: "map-wrap" }, [canvas, empty]);
+  var panel = { node: el("div", { class: "map-panel" }, [title, wrap]), canvas: canvas, wrap: wrap, empty: empty, title: title, which: "outside", scale: 1 };
   var drag = null;
   canvas.addEventListener("pointerdown", function (e) { drag = { x: e.clientX, y: e.clientY }; try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* old browser */ } });
   canvas.addEventListener("pointermove", function (e) {
-    if (!drag || !mapUi) { return; }
-    mapPan.x -= (e.clientX - drag.x) / mapUi.scale;
-    mapPan.y -= (e.clientY - drag.y) / mapUi.scale;
+    if (!drag) { return; }
+    var pan = mapPans[panel.which];
+    pan.x -= (e.clientX - drag.x) / panel.scale;
+    pan.y -= (e.clientY - drag.y) / panel.scale;
     drag = { x: e.clientX, y: e.clientY };
     drawMap();
   });
@@ -1141,30 +1154,57 @@ function buildMap(content) {
     e.preventDefault();
     zoomMap(e.deltaY < 0 ? 1.25 : 1 / 1.25);
   }, { passive: false });
-  drawMap();
+  return panel;
 }
 
 function zoomMap(factor) {
   mapZoom = Math.min(12, Math.max(1, mapZoom * factor));
-  if (mapZoom === 1) { mapPan = { x: 0, y: 0 }; }
+  if (mapZoom === 1) { resetMapPan(); }
   drawMap();
 }
 
 window.addEventListener("resize", function () { drawMap(); });
 
 function drawMap() {
-  if (!mapUi || activeTab !== "Map" || !document.body.contains(mapUi.canvas)) { return; }
+  if (!mapUi || activeTab !== "Map" || !document.body.contains(mapUi.box)) { return; }
+  var g = (state && state.game) || {};
+  var players = (state && state.players) || [];
+  var me = players.filter(function (p) { return p.local; })[0];
+  var maps = mapMode === "both" ? ["outside", "inside"] : [mapMode === "auto" ? (me && me.inside ? "inside" : "outside") : mapMode];
+  Object.keys(mapUi.buttons).forEach(function (k) { mapUi.buttons[k].className = "btn small" + (k === mapMode ? " primary" : ""); });
+
+  // One canvas, or two side by side (stacked on a narrow screen).
+  if (mapUi.panels.length !== maps.length) {
+    mapUi.box.innerHTML = "";
+    mapUi.panels = maps.map(function () { var p = makeMapPanel(); mapUi.box.appendChild(p.node); return p; });
+  }
+  mapUi.box.className = "map-panels" + (maps.length > 1 ? " both" : "");
+
+  var problem = null;
+  if (!g.inRound || g.inShipPhase || !g.landed) { problem = "Land on a moon to see the map."; }
+  else if (!mapData) { problem = "Waiting for the map from the game (it's made a few seconds after landing)."; }
+  else if (g.mapSeed !== undefined && mapData.seed !== g.mapSeed) { problem = "Waiting for this moon's map..."; }
+  mapUi.info.textContent = problem ? "" : mapData.moon + (maps.length > 1 ? " | Outside and inside" : " | " + (maps[0] === "inside" ? "Inside the facility" : "Outside") + (mapMode === "auto" ? " (following you)" : ""));
+
+  maps.forEach(function (which, i) {
+    var panel = mapUi.panels[i];
+    panel.which = which;
+    panel.title.textContent = maps.length > 1 ? (which === "inside" ? "Inside" : "Outside") : "";
+    panel.title.style.display = maps.length > 1 ? "" : "none";
+    drawMapPanel(panel, which, problem, maps.length > 1);
+  });
+}
+
+function drawMapPanel(panel, which, problem, both) {
   var g = (state && state.game) || {};
   var players = (state && state.players) || [];
   var enemies = ((state && state.enemies) || []).filter(function (e) { return !e.dead; });
   var me = players.filter(function (p) { return p.local; })[0];
-  var which = mapMode === "auto" ? (me && me.inside ? "inside" : "outside") : mapMode;
-  Object.keys(mapUi.buttons).forEach(function (k) { mapUi.buttons[k].className = "btn small" + (k === mapMode ? " primary" : ""); });
 
-  var cssW = mapUi.wrap.clientWidth || 300;
-  var cssH = Math.round(Math.min(Math.max(window.innerHeight * 0.65, 280), cssW * 1.1));
+  var cssW = panel.wrap.clientWidth || 300;
+  var cssH = Math.round(Math.min(Math.max(window.innerHeight * (both ? 0.55 : 0.65), 260), cssW * 1.1));
   var dpr = window.devicePixelRatio || 1;
-  var canvas = mapUi.canvas;
+  var canvas = panel.canvas;
   if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
@@ -1174,26 +1214,22 @@ function drawMap() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
 
-  var problem = null;
-  if (!g.inRound || g.inShipPhase || !g.landed) { problem = "Land on a moon to see the map."; }
-  else if (!mapData) { problem = "Waiting for the map from the game (it's made a few seconds after landing)."; }
-  else if (g.mapSeed !== undefined && mapData.seed !== g.mapSeed) { problem = "Waiting for this moon's map..."; }
   var floor = problem ? null : floorImage(which);
   if (!problem && !floor) { problem = which === "inside" ? "This moon has no inside." : "No outside map for this moon."; }
-  mapUi.empty.textContent = problem || "";
-  mapUi.empty.style.display = problem ? "" : "none";
-  mapUi.info.textContent = problem ? "" : mapData.moon + " | " + (which === "inside" ? "Inside the facility" : "Outside") + (mapMode === "auto" ? " (following you)" : "");
+  panel.empty.textContent = problem || "";
+  panel.empty.style.display = problem ? "" : "none";
   if (problem) { return; }
 
   var grid = floor.grid;
   var scale = Math.min(cssW / grid.w, cssH / grid.h) * mapZoom;
-  mapUi.scale = scale;
+  panel.scale = scale;
   function toGrid(pos) { return { x: (pos[0] - grid.x0) / grid.cell, y: grid.h - (pos[1] - grid.z0) / grid.cell }; }
   // Zoomed in: keep you in the middle (when you are on this map); otherwise the middle of the map.
   var centre = { x: grid.w / 2, y: grid.h / 2 };
   if (mapZoom > 1 && me && me.pos && !me.dead && (me.inside ? "inside" : "outside") === which) { centre = toGrid(me.pos); }
-  var ox = cssW / 2 - (centre.x + mapPan.x) * scale;
-  var oy = cssH / 2 - (centre.y + mapPan.y) * scale;
+  var pan = mapPans[which];
+  var ox = cssW / 2 - (centre.x + pan.x) * scale;
+  var oy = cssH / 2 - (centre.y + pan.y) * scale;
   function screen(pos) { var q = toGrid(pos); return { x: ox + q.x * scale, y: oy + q.y * scale }; }
 
   ctx.imageSmoothingEnabled = false;

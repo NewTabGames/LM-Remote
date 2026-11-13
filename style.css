@@ -136,6 +136,10 @@ input:focus, select:focus { border-color: var(--accent); }
 .map-bar .map-info { color: var(--muted); font-size: 13px; margin: 0 0 6px 6px; }
 .map-wrap { position: relative; background: #0b0b0b; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; touch-action: none; }
 .map-wrap canvas { display: block; width: 100%; cursor: grab; }
+/* Both: outside and inside side by side, stacked when the screen is narrow (margins, not gap: old tablets) */
+.map-panels.both { display: flex; flex-wrap: wrap; margin: 0 -4px; }
+.map-panels.both .map-panel { flex: 1 1 320px; min-width: 0; margin: 0 4px 8px; }
+.map-panel-title { font-size: 13px; color: var(--muted); margin: 0 0 4px 2px; }
 .map-empty { position: absolute; left: 0; right: 0; top: 45%; text-align: center; color: var(--muted); padding: 0 16px; }
 .map-legend { display: flex; flex-wrap: wrap; margin-top: 8px; font-size: 13px; color: var(--muted); }
 .map-legend span { margin: 0 14px 4px 0; white-space: nowrap; }
@@ -160,12 +164,16 @@ input:focus, select:focus { border-color: var(--accent); }
 #content { padding: 4px 16px 16px; }
 .section-title { margin: 14px 0 8px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
 
-/* Sections: one box each, side by side on wide screens */
-.groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); grid-gap: 12px; align-items: start; margin-top: 8px; }
-.groups.single { grid-template-columns: 1fr; }
-@media (max-width: 720px) { .groups { grid-template-columns: 1fr; } }
-.group { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-.group-title { display: flex; justify-content: space-between; align-items: center; background: var(--head); border-bottom: 1px solid var(--line); padding: 8px 12px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+/* Sections: newspaper-style columns. Boxes stack straight down with no gaps, and a long box carries on at the
+   top of the next column (each piece keeps its own border), so the columns come out about the same height.
+   A feature row is never cut in half, and a box title never sits alone at the bottom of a column. */
+.groups { -webkit-column-width: 340px; column-width: 340px; -webkit-column-gap: 12px; column-gap: 12px; margin-top: 8px; }
+.groups.single { -webkit-column-count: 1; column-count: 1; }
+@media (max-width: 720px) { .groups { -webkit-column-count: 1; column-count: 1; } }
+.group { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); margin: 0 0 12px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.group-title { display: flex; justify-content: space-between; align-items: center; background: var(--head); border-bottom: 1px solid var(--line); border-radius: var(--r) var(--r) 0 0; padding: 8px 12px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); -webkit-column-break-after: avoid; break-after: avoid; }
+.group-body .row { -webkit-column-break-inside: avoid; break-inside: avoid; }
+.group-body .row:last-child { border-radius: 0 0 var(--r) var(--r); }
 .group-title .count { font-weight: normal; opacity: 0.7; }
 
 .row { padding: 4px 12px; border-top: 1px solid var(--line-2); }
@@ -183,9 +191,10 @@ input:focus, select:focus { border-color: var(--accent); }
 .row-args .run { margin: 0 0 8px; }
 
 /* Player and enemy boxes */
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); grid-gap: 8px; }
-@media (max-width: 560px) { .cards { grid-template-columns: 1fr; } }
-.entity { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+/* Same idea as the sections, but a card is never split: cards stack down each column without gaps. */
+.cards { -webkit-column-width: 270px; column-width: 270px; -webkit-column-gap: 8px; column-gap: 8px; }
+@media (max-width: 560px) { .cards { -webkit-column-count: 1; column-count: 1; } }
+.entity { display: inline-block; width: 100%; vertical-align: top; margin: 0 0 8px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; -webkit-column-break-inside: avoid; break-inside: avoid; }
 .entity.dead { opacity: 0.55; }
 .entity-head { display: flex; justify-content: space-between; align-items: baseline; background: var(--head); border-bottom: 1px solid var(--line); padding: 8px 10px; }
 .entity-name { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }

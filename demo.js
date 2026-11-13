@@ -100,6 +100,32 @@ demo.state.settings.b_StealthMode = false;
 });
 demo.catalog.hacks.X_StealItems.only = "HoarderBugAI";
 demo.catalog.hacks.AggroHunt.only = "MouthDogAI";
+// The real Troll / Players / Server sections (same sizes as the game sends), to check the layout.
+var realSections = [
+  ["Troll", "Monsters", "Force Tentacle Attack,Spawn Hoarding Bug Infestation,Spawn Masked Enemy", ""],
+  ["Troll", "Ship & Facility", "Eject Everyone,Open Ship Door Space,Toggle Factory Lights,Toggle Mineshaft Elevator,Toggle Ship Lights", "Open Ship Door Space"],
+  ["Troll", "Shotguns", "Shoot All Shotguns,Spam Shoot All Shotguns", "Spam Shoot All Shotguns"],
+  ["Troll", "Sounds", "PJ Spammer,Slide Taunt,Toggle Car Horn,Toggle Deposit Desk Door Sound,Toggle Ship Horn,Toggle Terminal Sound", "*"],
+  ["Troll", "Traps & Explosives", "Berserk All Turrets,Blow Up All Landmines,Explode All Jetpacks,Explode Cruiser,Explode Jetpacks On Grab,Force Bridge Fall,Force Small Bridge Fall,Toggle All Landmines,Toggle All Turrets,Toggle Vehicle Magnet", "Berserk All Turrets,Explode Jetpacks On Grab,Toggle All Landmines,Toggle All Turrets"],
+  ["Players", "Player actions", "Kill Everyone,Kill Everyone Else", ""],
+  ["Server", "Info display", "Display Bodies,Display Credits,Display Deadline,Display Enemies,Display Map Objects,Display Quota,Display Ship Objects,Toggle All Displays", "*Toggle All Displays"],
+  ["Server", "Lobby", "Disconnect,Show Offensive Lobby Names", "Show Offensive Lobby Names"],
+  ["Server", "Round", "Clear Meteor Shower,End Game,Force Meteor Shower,Reset Ship,Start Game", ""],
+  ["Server", "Spawning (host)", "Spawn Landmine,Spawn More Scrap,Spawn Spike Roof Trap,Spawn Turret", ""],
+  ["Server", "Unlocks", "Unlock All Ship Items,Unlock All Suits", ""]
+];
+realSections.forEach(function (s) {
+  s[2].split(",").forEach(function (name) {
+    var key = name.replace(/[^A-Za-z]/g, "");
+    var isToggle = s[3] === "*" || (s[3].charAt(0) === "*" ? name !== s[3].substring(1) : s[3].split(",").indexOf(name) >= 0);
+    demo.catalog.hacks[key] = { name: name, category: s[0], group: s[1], toggle: isToggle, action: !isToggle, args: [] };
+  });
+});
+["DeathNotifications", "DemiGod", "MiniCam", "SpectatePlayer", "TeleportAllEnemies"].forEach(function (k) { demo.catalog.hacks[k].group = "Player actions"; });
+["StartGame", "EndGame"].forEach(function (k) { demo.catalog.hacks[k].group = "Round"; });
+demo.catalog.hacks.ModifyCredits.group = "Money & Quota"; demo.catalog.hacks.Shoplifter.group = "Money & Quota"; demo.catalog.hacks.Message.group = "Chat";
+["ToggleShipLights", "ToggleShipHorn", "PJSpammer", "BerserkAllTurrets"].forEach(function (k) { demo.catalog.hacks[k].group = demo.catalog.hacks[k].group || "Sounds"; });
+
 // Hunt With All: every monster walks to the chosen player.
 demo.catalog.hacks.HuntWithAll = { name: "Hunt With All", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Player", kind: "player" }] };
 

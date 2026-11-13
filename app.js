@@ -534,7 +534,20 @@ function hackRow(h) {
   } else if (h.action) {
     var getters = [];
     var argsBox = el("div", { class: "row-args" });
-    h.args.forEach(function (arg) { getters.push(argControl(arg, argsBox)); });
+    // A feature whose slider IS its one number (Kill Nearby Enemies' distance): Run sends the slider value,
+    // instead of showing a second box for the same thing.
+    var sliderIsArg = !!h.slider && !h.toggle && h.args.filter(function (a) { return a.kind === "number"; }).length === 1;
+    h.args.forEach(function (arg) {
+      if (sliderIsArg && arg.kind === "number") {
+        var sl = ui.sliders[h.slider.setting];
+        getters.push(function () {
+          var v = parseFloat(sl.input.value);
+          return isNaN(v) ? undefined : (arg.integer ? Math.round(v) : v);
+        });
+        return;
+      }
+      getters.push(argControl(arg, argsBox));
+    });
     argsBox.appendChild(el("button", {
       class: "btn primary small run",
       type: "button",
@@ -751,7 +764,7 @@ var NOT_ON_SELF = { SpectatePlayer: true, MiniCam: true };
 function targetsOf() {
   var t = (state && state.targets) || {};
   return { spectating: t.spectating === undefined ? -1 : t.spectating, miniCam: t.miniCam === undefined ? -1 : t.miniCam, demiGod: t.demiGod || [], controlling: t.controlling || null,
-    controlTarget: t.controlTarget === undefined ? -1 : t.controlTarget, aiDriving: !!t.aiDriving };
+    controlTarget: t.controlTarget === undefined ? -1 : t.controlTarget, aiDriving: !!t.aiDriving, hunts: t.hunts || [] };
 }
 
 function nameOfClient(players, clientId) {
@@ -816,6 +829,10 @@ function renderRunningBar() {
   }
   if (targets.spectating >= 0) { stop("Stop spectating " + nameOfClient(players, targets.spectating), { type: "toggle", hack: "SpectatePlayer", value: false }); }
   if (targets.miniCam >= 0) { stop("Stop mini cam (" + nameOfClient(players, targets.miniCam) + ")", { type: "toggle", hack: "MiniCam", value: false }); }
+  // Monsters walking to a player with Hunt Player.
+  targets.hunts.forEach(function (h) {
+    stop("Stop " + h.enemyName + " walking to " + h.player, { type: "stopHunt", enemy: h.enemy });
+  });
   if (toggles.FreeCam && !targets.controlling) { stop("Stop free cam", { type: "toggle", hack: "FreeCam", value: false }); }
   bar.classList.toggle("hidden", stops.length === 0);
   if (stops.length) {

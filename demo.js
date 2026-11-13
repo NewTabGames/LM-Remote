@@ -73,3 +73,11 @@ demo.catalog.hacks.SuperSpeed.slider = { setting: "f_movementSpeed", min: 4.6, m
 demo.catalog.hacks.SuperJump.slider = { setting: "f_jumpForce", min: 13, max: 213, step: 0.5 };
 demo.state.toggles.FOV = true;
 demo.state.toggles.SuperSpeed = true;
+
+// Sample hunt (Hunt Player in the Enemies tab).
+demo.catalog.hacks.HuntPlayer = { name: "Hunt Player", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };
+demo.catalog.hacks.StopAllHunts = { name: "Stop All Hunts", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [] };
+demo.state.targets = demo.state.targets || {};
+demo.state.targets.hunts = [{ enemy: 1, enemyName: "Bracken", player: "Friend" }];
+if (demo.catalog.hacks.KillNearbyEnemies) { demo.catalog.hacks.KillNearbyEnemies.slider = { setting: "f_enemyKillDistance", min: 5, max: 50, step: 1 }; }
+demo.state.settings.f_enemyKillDistance = 15;

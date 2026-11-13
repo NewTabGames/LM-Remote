@@ -687,6 +687,23 @@ function applyState(force) {
   renderRunningBar();
   if (!state) { return; }
   $("btn-menu").textContent = state.menuOpen ? "Close menu in game" : "Open menu in game";
+  // Stealth Mode: the PC shows no menu and no notifications; this website is the only control.
+  var stealth = !!(state.settings && state.settings.b_StealthMode);
+  var stealthBtn = $("btn-stealth");
+  if (!stealthBtn) {
+    stealthBtn = el("button", {
+      id: "btn-stealth", type: "button", class: "btn small",
+      onclick: function () {
+        var on = !!(state && state.settings && state.settings.b_StealthMode);
+        send({ type: "setting", name: "b_StealthMode", value: !on });
+      }
+    });
+    $("btn-menu").parentNode.insertBefore(stealthBtn, $("btn-menu"));
+    $("btn-menu").style.marginLeft = "6px";
+  }
+  stealthBtn.textContent = stealth ? "Stealth: ON" : "Stealth: off";
+  stealthBtn.className = "btn small" + (stealth ? " primary" : "");
+  $("btn-menu").disabled = stealth; // the in-game menu can't be opened while stealth is on
 
   var toggles = state.toggles || {};
   var now = Date.now();
@@ -790,6 +807,7 @@ function renderStrip() {
   chip("Credits", g.credits);
   if (g.quota !== undefined) { chip("Quota", g.fulfilled + " / " + g.quota); chip("Days left", g.daysLeft); }
   chip("Host", g.isHost ? "yes" : "no");
+  if (state.settings && state.settings.b_StealthMode) { chip("Stealth", "on"); }
 }
 
 // Camera-style hacks that only make sense on other players (same rule as the in-game menu).

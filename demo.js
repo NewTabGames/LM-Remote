@@ -92,3 +92,5 @@ demo.catalog.hacks.X_SpawnItem = { name: "Spawn Item (host)", category: "Server"
   args: [{ name: "Item", kind: "enum", options: [] }, { name: "Amount", kind: "number", integer: true, optional: true, hint: "1" }, { name: "Scrap Value", kind: "number", integer: true, optional: true, hint: "random" }] };
 demo.catalog.hacks.AggroHunt = { name: "Aggro Hunt", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };
 demo.catalog.hacks.PersistentHunt = { name: "Persistent Hunt", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };
+demo.catalog.settings.b_StealthMode = { name: "Stealth Mode", type: "bool" };
+demo.state.settings.b_StealthMode = false;

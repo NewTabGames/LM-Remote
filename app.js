@@ -440,7 +440,7 @@ function loadRequiredVersion() {
     .catch(function () { /* can't check: don't lock anything */ });
 }
 loadRequiredVersion();
-setInterval(loadRequiredVersion, 600000);
+setInterval(loadRequiredVersion, 300000);
 
 function refreshOnline() {
   var info = currentDev ? deviceInfo[currentDev] : null;

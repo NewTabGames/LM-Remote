@@ -441,9 +441,13 @@ $("search").addEventListener("input", function (e) {
 });
 
 // ---------- catalog rendering ----------
+// Features and settings the menu no longer has (removed in v1.4.8). An older menu, or a PC that was offline
+// since before the update, still lists them; never show them.
+var REMOVED = { AntiKick: true, b_DisplayLMUsers: true, b_DisplayHostKickedLobbies: true };
+
 function hackEntries() {
   var hacks = (catalog && catalog.hacks) || {};
-  return Object.keys(hacks).map(function (key) {
+  return Object.keys(hacks).filter(function (key) { return !REMOVED[key]; }).map(function (key) {
     var h = hacks[key];
     var tab = tabFor(key, h.category);
     var placed = tab === h.category;
@@ -458,7 +462,7 @@ function matchesSearch(text) { return !search || text.toLowerCase().indexOf(sear
 
 function settingEntries() {
   var settings = (catalog && catalog.settings) || {};
-  return Object.keys(settings).map(function (key) {
+  return Object.keys(settings).filter(function (key) { return !REMOVED[key]; }).map(function (key) {
     return { key: key, name: settings[key].name || key, type: settings[key].type };
   }).filter(function (s) { return matchesSearch(s.name); }).sort(function (a, b) { return byText(a.name, b.name); });
 }

@@ -375,9 +375,23 @@ function selectDevice(id) {
   refreshOnline();
 }
 
+// The last enemy list a PC sent goes stale the moment it goes offline (those monsters may be long dead or the
+// round over), so while it's offline the website shows no enemies, no hunts, and no monster dots on the map.
+var wasOnline = null;
+
+function pcOnline() { return isOnline(currentDev ? deviceInfo[currentDev] : null); }
+
+function liveEnemies() {
+  return pcOnline() ? ((state && state.enemies) || []).filter(function (e) { return !e.dead; }) : [];
+}
+
+function noEnemiesText() { return pcOnline() ? "No living enemies right now" : "PC is offline: no enemies shown"; }
+
 function refreshOnline() {
   var info = currentDev ? deviceInfo[currentDev] : null;
   var online = isOnline(info);
+  if (wasOnline !== null && online !== wasOnline) { applyState(true); } // went offline/online: clear or bring back the enemies
+  wasOnline = online;
   $("device-dot").className = "dot " + (currentDev ? (online ? "on" : "off") : "");
   $("offline-note").classList.toggle("hidden", !currentDev || online);
   var meta = [];
@@ -786,7 +800,7 @@ function applyState(force) {
   });
 
   var players = state.players || [];
-  var enemies = (state.enemies || []).filter(function (e) { return !e.dead; });
+  var enemies = liveEnemies();
   var sigP = JSON.stringify([players, state.targets || null]);
   // Which enemies exist (not how far away they are): the cards are only rebuilt when this changes.
   var sigE = JSON.stringify(enemies.map(function (e) { return [e.id, e.name]; }));
@@ -795,7 +809,7 @@ function applyState(force) {
   }), "No players (join a lobby first)");
   fillSelects(ui.enemySelects, enemies.map(function (e) {
     return { value: e.id, name: e.name, text: e.name + " (" + e.distance + "m" + (e.inside ? ", inside" : "") + ")" };
-  }), "No living enemies right now");
+  }), noEnemiesText());
   if (force || sigP !== ui.sigPlayers) {
     ui.sigPlayers = sigP;
     renderPlayers(players);
@@ -883,8 +897,8 @@ var NOT_ON_SELF = { SpectatePlayer: true, MiniCam: true };
 
 function targetsOf() {
   var t = (state && state.targets) || {};
-  return { spectating: t.spectating === undefined ? -1 : t.spectating, miniCam: t.miniCam === undefined ? -1 : t.miniCam, demiGod: t.demiGod || [], controlling: t.controlling || null,
-    controlTarget: t.controlTarget === undefined ? -1 : t.controlTarget, aiDriving: !!t.aiDriving, hunts: t.hunts || [] };
+  return { spectating: t.spectating === undefined ? -1 : t.spectating, miniCam: t.miniCam === undefined ? -1 : t.miniCam, demiGod: t.demiGod || [], controlling: pcOnline() ? (t.controlling || null) : null,
+    controlTarget: t.controlTarget === undefined ? -1 : t.controlTarget, aiDriving: !!t.aiDriving, hunts: pcOnline() ? (t.hunts || []) : [] };
 }
 
 function nameOfClient(players, clientId) {
@@ -994,7 +1008,7 @@ function renderEnemies(enemies) {
   ui.enemyMeta = {};
   if (!box) { return; }
   box.innerHTML = "";
-  if (!enemies.length) { box.appendChild(el("div", { class: "empty-list", text: "No living enemies right now." })); return; }
+  if (!enemies.length) { box.appendChild(el("div", { class: "empty-list", text: noEnemiesText() + "." })); return; }
   var byName = function (a, b) { return byText(enemyButtonName(a), enemyButtonName(b)); };
   var actions = hackEntries().filter(function (h) { return isSingleArg(h, "enemy"); }).sort(byName);
   var pairActions = hackEntries().filter(isEnemyPlayerPair).sort(byName);
@@ -1198,7 +1212,7 @@ function drawMap() {
 function drawMapPanel(panel, which, problem, both) {
   var g = (state && state.game) || {};
   var players = (state && state.players) || [];
-  var enemies = ((state && state.enemies) || []).filter(function (e) { return !e.dead; });
+  var enemies = liveEnemies();
   var me = players.filter(function (p) { return p.local; })[0];
 
   var cssW = panel.wrap.clientWidth || 300;
@@ -1296,7 +1310,9 @@ if (DEMO) {
   import("./demo.js").then(function (m) {
     show("view-app");
     deviceIndex = { demo: { name: "Demo PC" } };
-    deviceInfo = { demo: { name: "Demo PC", online: true, lastSeen: Date.now(), version: m.demo.catalog.version } };
+    // index.html?demo&offline shows the demo PC as offline (what the panel looks like when the game is closed).
+    var demoOffline = /[?&]offline\b/.test(location.search);
+    deviceInfo = { demo: { name: "Demo PC", online: !demoOffline, lastSeen: Date.now() - (demoOffline ? 600000 : 0), version: m.demo.catalog.version } };
     $("account-name").textContent = "demo_user";
     serverOffset = 0;
     currentDev = "demo";
@@ -1307,7 +1323,7 @@ if (DEMO) {
     renderTabs();
     buildContent();
     refreshOnline();
-    setInterval(function () { deviceInfo.demo.lastSeen = Date.now(); }, 5000);
+    setInterval(function () { if (!demoOffline) { deviceInfo.demo.lastSeen = Date.now(); } }, 5000);
     // Like the real thing: enemies move, so their distances change twice a second.
     setInterval(function () {
       (state.enemies || []).forEach(function (e) {

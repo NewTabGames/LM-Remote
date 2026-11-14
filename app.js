@@ -51,7 +51,7 @@ var ui = freshUi();
 var pendingToggles = {};
 
 function freshUi() {
-  return { toggles: {}, rows: {}, sliders: {}, enemyMeta: {}, enemyPlayerSelect: null, playerSelects: [], enemySelects: [], settings: {}, playersBox: null, enemiesBox: null, sigPlayers: "", sigEnemies: "" };
+  return { toggles: {}, rows: {}, sliders: {}, enemyMeta: {}, enemyPlayerSelect: null, enemyNote: null, playerSelects: [], enemySelects: [], settings: {}, playersBox: null, enemiesBox: null, sigPlayers: "", sigEnemies: "" };
 }
 
 // ---------- helpers ----------
@@ -346,6 +346,7 @@ function selectDevice(id) {
   devSubs.forEach(function (unsub) { unsub(); });
   devSubs = [];
   currentDev = id;
+  lastMapPing = 0;
   catalog = null;
   state = null;
   lastResultSeen = undefined;
@@ -368,6 +369,8 @@ function selectDevice(id) {
   }));
   devSubs.push(onValue(ref(db, base + "state"), function (snap) {
     state = snap.val();
+    // Just opened the site on the Map tab, or picked another PC: tell the game the map is being watched.
+    if (activeTab === "Map" && Date.now() - lastMapPing > 20000) { mapPing(true); }
     applyState();
   }));
   devSubs.push(onValue(ref(db, base + "map"), function (snap) {
@@ -376,7 +379,8 @@ function selectDevice(id) {
   devSubs.push(onValue(ref(db, base + "lastResult"), function (snap) {
     var result = snap.val();
     var resultId = result ? result.id : null;
-    if (lastResultSeen !== undefined && result && resultId !== lastResultSeen) {
+    // Map pings answer "pong" quietly (older menus don't mark them quiet, hence the message check).
+    if (lastResultSeen !== undefined && result && resultId !== lastResultSeen && !result.quiet && result.message !== "pong") {
       toast(result.message || (result.ok ? "Done" : "Failed"), result.ok ? "ok" : "fail");
     }
     lastResultSeen = resultId;
@@ -453,7 +457,7 @@ function hackEntries() {
     var placed = tab === h.category;
     return {
       key: key, name: h.name || key, category: tab, group: placed && h.group && h.group !== "Other" ? h.group : tab,
-      toggle: !!h.toggle, action: !!h.action, args: h.args || [], slider: h.slider || null, only: h.only || null
+      toggle: !!h.toggle, action: !!h.action, args: h.args || [], slider: h.slider || null, only: h.only || null, not: h.not || null
     };
   }).sort(function (a, b) { return byText(a.name, b.name); });
 }
@@ -485,7 +489,20 @@ var ENEMY_BUTTON_NAMES = {
 function enemyButtonName(h) { return ENEMY_BUTTON_NAMES[h.key] || h.name.replace(/\s*Enemy\s*/g, " ").trim() || h.name; }
 
 // Does this action fit this enemy? Some only make sense for one monster (matched by its type, or its name).
-function fitsEnemy(h, e) { return !h.only || h.only === e.type || h.only === e.name; }
+function fitsEnemy(h, e) {
+  if (h.not && h.not.indexOf(e.type) >= 0) { return false; } // e.g. "Kill player" on monsters that can't hurt anyone
+  return !h.only || h.only === e.type || h.only === e.name;
+}
+
+// The player picked at the top of the Enemies tab (null if none, or they're not in the lobby).
+function enemyTabTarget() {
+  var v = ui.enemyPlayerSelect ? ui.enemyPlayerSelect.value : enemyTabPlayer;
+  if (v === "" || v == null) { return null; }
+  return ((state && state.players) || []).filter(function (p) { return String(p.id) === String(v); })[0] || null;
+}
+
+// Re-draw the enemy cards (the picked player changed, or moved inside/outside).
+function refreshEnemyCards() { ui.sigEnemies = ""; applyState(false); }
 
 var enemyTabPlayer = loadPref("enemyPlayer") || "";
 
@@ -503,7 +520,14 @@ function renderTabs() {
     tabs.appendChild(el("button", {
       class: "tab" + (tab === activeTab ? " active" : ""),
       type: "button",
-      onclick: function () { activeTab = tab; savePref("tab", tab); renderTabs(); buildContent(); }
+      onclick: function () {
+        var wasMap = activeTab === "Map";
+        activeTab = tab;
+        savePref("tab", tab);
+        renderTabs();
+        buildContent();
+        if (wasMap !== (tab === "Map")) { mapPing(tab === "Map"); }
+      }
     }, [tab, tab === "Map" ? null : el("span", { class: "count", text: String(counts[tab] || 0) })]));
   });
 }
@@ -530,10 +554,12 @@ function buildContent() {
       content.appendChild(el("div", { class: "section-title", text: "Enemies" }));
       // One player picker for every enemy's Hunt / Anger / Teleport buttons.
       var pick = el("select", { "aria-label": "Player" });
-      pick.addEventListener("change", function () { enemyTabPlayer = pick.value; savePref("enemyPlayer", pick.value); });
+      pick.addEventListener("change", function () { enemyTabPlayer = pick.value; savePref("enemyPlayer", pick.value); refreshEnemyCards(); });
       ui.playerSelects.push(pick);
       ui.enemyPlayerSelect = pick;
       content.appendChild(el("div", { class: "pick-bar" }, [el("span", { class: "pick-label", text: "Player for the hunt / anger / teleport buttons:" }), pick]));
+      // Only the monsters in the same place as that player (inside or outside) are shown; this line says so.
+      ui.enemyNote = content.appendChild(el("div", { class: "cards-note hidden" }));
       ui.enemiesBox = content.appendChild(el("div", { class: "cards" }));
     }
     var list = hackEntries().filter(function (h) {
@@ -570,6 +596,7 @@ function buildContent() {
       if (other && has(String(other.id))) { ps.value = String(other.id); }
       enemyTabPlayer = ps.value;
     }
+    refreshEnemyCards();
   }
 }
 
@@ -819,7 +846,8 @@ function applyState(force) {
   var enemies = liveEnemies();
   var sigP = JSON.stringify([players, state.targets || null]);
   // Which enemies exist (not how far away they are): the cards are only rebuilt when this changes.
-  var sigE = JSON.stringify(enemies.map(function (e) { return [e.id, e.name]; }));
+  var chosen = enemyTabTarget();
+  var sigE = JSON.stringify([enemies.map(function (e) { return [e.id, e.name, e.inside]; }), chosen ? [chosen.id, chosen.inside, chosen.dead] : null]);
   fillSelects(ui.playerSelects, players.map(function (p) {
     return { value: p.id, name: p.name, text: p.name + (p.local ? " (you)" : "") + (p.dead ? " (dead)" : "") };
   }), "No players (join a lobby first)");
@@ -880,20 +908,25 @@ function fillSelects(selects, options, emptyText) {
 function renderStrip() {
   var strip = $("game-strip");
   strip.innerHTML = "";
-  function chip(label, value) { strip.appendChild(el("span", { class: "chip" }, [label + " ", el("b", { text: String(value) })])); }
+  // Every box has a fixed width (wide enough for its longest value), and they're always in the same order,
+  // so nothing shifts around when a number changes or someone picks something up.
+  function chip(label, value, width) {
+    strip.appendChild(el("span", { class: "chip", style: width ? "width:" + width + "ch" : "" }, [label + " ", el("b", { text: String(value) })]));
+  }
   if (!state || !state.game) { chip("Status", currentDev ? "waiting for game" : "-"); return; }
   var g = state.game;
   if (!g.inRound) { chip("Status", "Main menu / lobby list"); return; }
-  chip("Moon", g.moon || "-");
-  chip("Phase", g.inShipPhase ? "In orbit" : (g.landed ? "Landed" : "Travelling"));
+  chip("Moon", g.moon || "-", 19);
+  chip("Phase", g.inShipPhase ? "In orbit" : (g.landed ? "Landed" : "Travelling"), 17);
   // A card per player: you first, then everyone else A-Z.
   var players = (state.players || []).slice().sort(function (a, b) { return (b.local ? 1 : 0) - (a.local ? 1 : 0) || byText(a.name, b.name); });
   players.forEach(function (p) { strip.appendChild(playerChip(p)); });
   if (!players.length && g.localName) { chip(g.localName, g.alive ? g.health + " HP" : "dead"); }
-  chip("Credits", g.credits);
-  if (g.quota !== undefined) { chip("Quota", g.fulfilled + " / " + g.quota); chip("Days left", g.daysLeft); }
-  chip("Host", g.isHost ? "yes" : "no");
-  if (state.settings && state.settings.b_StealthMode) { chip("Stealth", "on"); }
+  chip("Credits", g.credits, 14);
+  chip("Quota", g.quota !== undefined ? g.fulfilled + " / " + g.quota : "-", 18);
+  chip("Days left", g.daysLeft !== undefined ? g.daysLeft : "-", 13);
+  chip("Host", g.isHost ? "yes" : "no", 10);
+  chip("Stealth", state.settings && state.settings.b_StealthMode ? "on" : "off", 13);
 }
 
 function playerChip(p) {
@@ -905,7 +938,7 @@ function playerChip(p) {
     parts.push(" | " + (p.inside ? "Inside" : "Outside"));
     if (p.item) { parts.push(el("span", { class: "pchip-item", text: p.item })); }
   }
-  return el("span", { class: "chip pchip" + (p.local ? " me" : "") + (p.dead ? " dead" : ""), title: p.local ? "You" : "" }, parts);
+  return el("span", { class: "chip pchip" + (p.local ? " me" : "") + (p.dead ? " dead" : ""), title: p.name + (p.item ? " | holding " + p.item : "") }, parts);
 }
 
 // Camera-style hacks that only make sense on other players (same rule as the in-game menu).
@@ -1067,6 +1100,7 @@ function renderEnemies(enemies) {
   if (!box) { return; }
   box.innerHTML = "";
   box.className = "cards";
+  if (ui.enemyNote) { ui.enemyNote.classList.add("hidden"); }
   if (!enemies.length) {
     box.appendChild(el("div", { class: "empty-list", text: noEnemiesText() + "." }));
     // The per-enemy actions (Teleport, Hunt, Kill...) live on the enemy cards; say so, so they aren't "missing".
@@ -1076,6 +1110,24 @@ function renderEnemies(enemies) {
       box.appendChild(el("div", { class: "empty-list", text: "Each enemy gets a card with: " + onCards.join(", ") + "." }));
     }
     return;
+  }
+  // Only the monsters where the picked player is (inside or outside). A dead player shows them all.
+  var who = enemyTabTarget();
+  var note = ui.enemyNote;
+  if (who && !who.dead) {
+    var where = who.inside ? "inside" : "outside";
+    var hidden = enemies.filter(function (e) { return !!e.inside !== !!who.inside; }).length;
+    enemies = enemies.filter(function (e) { return !!e.inside === !!who.inside; });
+    if (note) {
+      note.textContent = "Showing the monsters " + where + ", where " + (who.local ? "you are" : who.name + " is") + (hidden ? " (" + hidden + " " + (who.inside ? "outside" : "inside") + " hidden)." : ".");
+      note.classList.remove("hidden");
+    }
+    if (!enemies.length) {
+      box.appendChild(el("div", { class: "empty-list", text: "No monsters " + where + " right now." }));
+      return;
+    }
+  } else if (note) {
+    note.classList.add("hidden");
   }
   var byName = function (a, b) { return byText(enemyButtonName(a), enemyButtonName(b)); };
   var actions = hackEntries().filter(function (h) { return isSingleArg(h, "enemy"); }).sort(byName);
@@ -1122,6 +1174,17 @@ var mapImages = {};
 var mapUi = null;
 var mapMode = loadPref("mapMode") || "auto"; // auto = wherever you are; "outside", "inside", or "both" side by side
 var mapZoom = 1;
+var mapItems = loadPref("mapItems") !== "0"; // show items lying around (scrap etc.)
+
+// The game only sends positions (players, monsters, items) while someone has the Map tab open: this tells it.
+// Sent on opening the tab and every 20 seconds while it stays open; the game stops after 45s without one.
+var lastMapPing = 0;
+function mapPing(on) {
+  if (DEMO || !currentDev || !isOnline(deviceInfo[currentDev])) { return; }
+  lastMapPing = on ? Date.now() : 0;
+  push(ref(db, "devices/" + currentDev + "/commands"), { at: serverTimestamp(), type: "ping", map: !!on }).catch(function () { /* not important */ });
+}
+setInterval(function () { if (activeTab === "Map") { mapPing(true); } }, 20000);
 var mapPans = {}; // per map ("outside"/"inside"): how far it was dragged from the centre, in map cells
 
 function resetMapPan() { mapPans = { outside: { x: 0, y: 0 }, inside: { x: 0, y: 0 } }; }
@@ -1201,15 +1264,19 @@ function buildMap(content) {
   });
   bar.appendChild(el("button", { class: "btn small", type: "button", text: "Zoom out", onclick: function () { zoomMap(1 / 1.5); } }));
   bar.appendChild(el("button", { class: "btn small", type: "button", text: "Zoom in", onclick: function () { zoomMap(1.5); } }));
+  var itemsBtn = bar.appendChild(el("button", {
+    class: "btn small", type: "button",
+    onclick: function () { mapItems = !mapItems; savePref("mapItems", mapItems ? "1" : "0"); drawMap(); }
+  }));
   var info = bar.appendChild(el("span", { class: "map-info" }));
   var box = el("div", { class: "map-panels" });
   content.appendChild(bar);
   content.appendChild(box);
   content.appendChild(el("div", { class: "map-legend" }, [
     legendItem("#3cb371", "You"), legendItem("#4a90d9", "Players"), legendItem("#8a8a8a", "Dead"),
-    legendItem("#e5534b", "Monsters"), legendItem("#e0b341", "Ship"), legendItem("#ff8c1a", "Doors")
+    legendItem("#e5534b", "Monsters"), legendItem("#e0b341", "Ship"), legendItem("#ff8c1a", "Doors"), legendItem("#c792ea", "Items")
   ]));
-  mapUi = { box: box, panels: [], info: info, buttons: buttons };
+  mapUi = { box: box, panels: [], info: info, buttons: buttons, itemsBtn: itemsBtn };
   drawMap();
 }
 
@@ -1255,6 +1322,8 @@ function drawMap() {
   var me = players.filter(function (p) { return p.local; })[0];
   var maps = mapMode === "both" ? ["outside", "inside"] : [mapMode === "auto" ? (me && me.inside ? "inside" : "outside") : mapMode];
   Object.keys(mapUi.buttons).forEach(function (k) { mapUi.buttons[k].className = "btn small" + (k === mapMode ? " primary" : ""); });
+  mapUi.itemsBtn.textContent = mapItems ? "Items: on" : "Items: off";
+  mapUi.itemsBtn.className = "btn small" + (mapItems ? " primary" : "");
 
   // One canvas, or two side by side (stacked on a narrow screen).
   if (mapUi.panels.length !== maps.length) {
@@ -1307,9 +1376,9 @@ function drawMapPanel(panel, which, problem, both) {
   var scale = Math.min(cssW / grid.w, cssH / grid.h) * mapZoom;
   panel.scale = scale;
   function toGrid(pos) { return { x: (pos[0] - grid.x0) / grid.cell, y: grid.h - (pos[1] - grid.z0) / grid.cell }; }
-  // Zoomed in: keep you in the middle (when you are on this map); otherwise the middle of the map.
+  // Zoomed in on "Follow me": keep you in the middle. Otherwise the map stays where you zoomed/dragged it.
   var centre = { x: grid.w / 2, y: grid.h / 2 };
-  if (mapZoom > 1 && me && me.pos && !me.dead && (me.inside ? "inside" : "outside") === which) { centre = toGrid(me.pos); }
+  if (mapMode === "auto" && mapZoom > 1 && me && me.pos && !me.dead && (me.inside ? "inside" : "outside") === which) { centre = toGrid(me.pos); }
   var pan = mapPans[which];
   var ox = cssW / 2 - (centre.x + pan.x) * scale;
   var oy = cssH / 2 - (centre.y + pan.y) * scale;
@@ -1350,6 +1419,21 @@ function drawMapPanel(panel, which, problem, both) {
     ctx.fillStyle = "#e0b341";
     ctx.fillRect(ship.x - 10, ship.y - 6, 20, 12);
     label(ship, "Ship", "#e0b341", true);
+  }
+  if (mapItems) {
+    // Small purple diamonds; names (and value) once zoomed in enough to read them.
+    ((state && state.items) || []).filter(function (it) { return it.p && !!it.i === inside; }).forEach(function (it) {
+      var s = screen(it.p);
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y - 4); ctx.lineTo(s.x + 4, s.y); ctx.lineTo(s.x, s.y + 4); ctx.lineTo(s.x - 4, s.y);
+      ctx.closePath();
+      ctx.fillStyle = "#c792ea";
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "#000";
+      ctx.stroke();
+      if (mapZoom >= 2.5) { label(s, it.n + (it.v ? " ($" + it.v + ")" : ""), "#dcc2f2", true); }
+    });
   }
   enemies.filter(function (e) { return e.pos && !!e.inside === inside; }).forEach(function (e) {
     var s = screen(e.pos);

@@ -120,10 +120,11 @@ input:focus, select:focus { border-color: var(--accent); }
 
 /* Game info line */
 .strip { display: flex; flex-wrap: wrap; padding: 12px 16px 2px; }
-.chip { background: var(--panel); border: 1px solid var(--line); padding: 4px 10px; margin: 0 6px 6px 0; font-size: 13px; border-radius: 999px; white-space: nowrap; color: var(--muted); }
+.chip { background: var(--panel); border: 1px solid var(--line); padding: 4px 10px; margin: 0 6px 6px 0; font-size: 13px; border-radius: 999px; white-space: nowrap; color: var(--muted); overflow: hidden; text-overflow: ellipsis; -webkit-box-sizing: border-box; box-sizing: border-box; max-width: 100%; -webkit-flex: none; flex: none; }
 .chip b { color: var(--text); font-weight: normal; }
 /* Player cards in the info line: name, health, inside/outside (or dead), what they hold */
-.pchip { border-radius: var(--r-sm); border-left: 3px solid #4a90d9; }
+/* Fixed width so a card doesn't grow or shrink as health or the held item change (long names get "...") */
+.pchip { border-radius: var(--r-sm); border-left: 3px solid #4a90d9; width: 250px; }
 .pchip b { font-weight: bold; margin-right: 6px; }
 .pchip.me { border-left-color: var(--good); }
 .pchip.dead { border-left-color: var(--line); opacity: 0.6; }
@@ -204,6 +205,7 @@ input:focus, select:focus { border-color: var(--accent); }
 .entity-actions { display: flex; flex-wrap: wrap; padding: 8px 6px 4px 10px; }
 .entity-actions .btn { margin: 0 4px 4px 0; }
 .empty-list { color: var(--muted); padding: 6px 0; }
+.cards-note { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
 
 .running-bar { display: flex; flex-wrap: wrap; align-items: center; margin: 6px 16px 0; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: var(--r); padding: 6px 10px; }
 .running-label { color: #cfc3ff; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-right: 10px; }

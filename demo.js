@@ -179,6 +179,11 @@ demo.state.players[2].pos = [30, -10];
 demo.state.enemies[0].pos = [-55, -28];
 demo.state.enemies[1].pos = [20, 50];
 demo.state.enemies[2].pos = [-120, 60];
+demo.state.enemies.push({ id: 104, name: "Docile Locust Bees", type: "DocileLocustBeesAI", dead: false, inside: false, distance: 67, pos: [-90, 30] });
+demo.state.items = [
+  { n: "Large axle", v: 52, i: true, p: [-70, -35] }, { n: "Gold bar", v: 160, i: true, p: [40, 10] },
+  { n: "Brass bell", v: 63, i: true, p: [-20, -60] }, { n: "Whoopie cushion", v: 9, i: false, p: [-30, 25] }
+];
 
 demo.catalog.hacks.X_TargetPlayer ={ name: "Target Player (anger at)", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };
-demo.catalog.hacks.X_KillPlayerWithEnemy = { name: "Kill Player With Enemy", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };
+demo.catalog.hacks.X_KillPlayerWithEnemy = { name: "Kill Player With Enemy", category: "Enemies", group: "Enemies", toggle: false, action: true, not: ["DocileLocustBeesAI", "DoublewingAI", "FlowerSnakeEnemy", "DressGirlAI"], args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };

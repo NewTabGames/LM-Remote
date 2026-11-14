@@ -1188,7 +1188,7 @@ function renderEnemies(enemies) {
   var pairActions = hackEntries().filter(isEnemyPlayerPair).sort(byName);
   // A-Z by name; several of the same kind keep a fixed order so the cards don't swap places as they move.
   enemies.slice().sort(function (a, b) { return byText(a.name, b.name) || a.id - b.id; }).forEach(function (e) {
-    // Some actions only fit one kind of monster (webs for the Bunker Spider, stealing for the Hoarding Bug).
+    // Some actions only fit one kind of monster (webs for the Bunker Spider, stealing for the Loot Bug).
     var buttons = actions.filter(function (h) { return fitsEnemy(h, e); }).map(function (h) {
       return el("button", {
         class: "btn small", type: "button", text: enemyButtonName(h),
@@ -1340,25 +1340,55 @@ function makeMapPanel() {
   var empty = el("div", { class: "map-empty" });
   var title = el("div", { class: "map-panel-title" });
   var wrap = el("div", { class: "map-wrap" }, [canvas, empty]);
-  var panel = { node: el("div", { class: "map-panel" }, [title, wrap]), canvas: canvas, wrap: wrap, empty: empty, title: title, which: "outside", scale: 1 };
+  var tip = el("div", { class: "map-tip" });
+  tip.style.display = "none";
+  wrap.appendChild(tip);
+  var panel = { node: el("div", { class: "map-panel" }, [title, wrap]), canvas: canvas, wrap: wrap, empty: empty, title: title, which: "outside", scale: 1, items: [] };
+  // Hover (mouse) or tap (touch) on item diamonds: every item there with its value, even the unlabelled ones.
+  function showTip(e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = e.clientX - rect.left;
+    var y = e.clientY - rect.top;
+    var near = panel.items.filter(function (it) { return Math.abs(it.x - x) <= 9 && Math.abs(it.y - y) <= 9; });
+    if (!near.length) { tip.style.display = "none"; return; }
+    var lines = near.slice(0, 8).map(function (it) { return it.text; });
+    if (near.length > 8) { lines.push("and " + (near.length - 8) + " more"); }
+    tip.textContent = lines.join("\n");
+    tip.style.display = "";
+    tip.style.left = Math.min(Math.max(x + 12, 0), Math.max(rect.width - tip.offsetWidth - 4, 0)) + "px";
+    tip.style.top = Math.min(y + 12, Math.max(rect.height - tip.offsetHeight - 4, 0)) + "px";
+  }
   var drag = null;
-  canvas.addEventListener("pointerdown", function (e) { drag = { x: e.clientX, y: e.clientY }; try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* old browser */ } });
+  canvas.addEventListener("pointerdown", function (e) { drag = { x: e.clientX, y: e.clientY, moved: 0 }; try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* old browser */ } });
   canvas.addEventListener("pointermove", function (e) {
-    if (!drag) { return; }
+    if (!drag) {
+      if (e.pointerType === "mouse") { showTip(e); }
+      return;
+    }
     var pan = mapPans[panel.which];
     pan.x -= (e.clientX - drag.x) / panel.scale;
     pan.y -= (e.clientY - drag.y) / panel.scale;
-    drag = { x: e.clientX, y: e.clientY };
+    drag = { x: e.clientX, y: e.clientY, moved: drag.moved + Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) };
+    tip.style.display = "none";
     drawMap();
   });
-  canvas.addEventListener("pointerup", function () { drag = null; });
+  canvas.addEventListener("pointerup", function (e) {
+    if (drag && drag.moved < 6) { showTip(e); }
+    drag = null;
+  });
   canvas.addEventListener("pointercancel", function () { drag = null; });
+  canvas.addEventListener("pointerleave", function (e) { if (e.pointerType === "mouse") { tip.style.display = "none"; } });
   canvas.addEventListener("wheel", function (e) {
     if (e.deltaY > 0 && mapZoom === 1) { return; } // fully zoomed out: let the page scroll
     e.preventDefault();
     zoomMap(e.deltaY < 0 ? 1.25 : 1 / 1.25);
   }, { passive: false });
   return panel;
+}
+
+// "Gold bar $160"; tools and other things with no scrap value just show their name.
+function itemText(it) {
+  return (it.n || "Item") + (it.v ? " $" + it.v : "");
 }
 
 function zoomMap(factor) {
@@ -1475,10 +1505,40 @@ function drawMapPanel(panel, which, problem, both) {
     ctx.fillRect(ship.x - 10, ship.y - 6, 20, 12);
     label(ship, "Ship", "#e0b341", true);
   }
+  panel.items = [];
   if (mapItems) {
-    // Small purple diamonds; names (and value) once zoomed in enough to read them.
-    liveItems().filter(function (it) { return it.p && !!it.i === inside; }).forEach(function (it) {
-      var s = screen(it.p);
+    // Purple diamonds with name and value. Where labels would overlap (piles of loot, zoomed out), the most
+    // valuable item keeps its label; zoom in, or hover / tap a diamond, to read the rest.
+    var taken = [];
+    // Room for the players and monsters (dot and name, drawn on top afterwards), the doors and the ship.
+    players.concat(enemies).forEach(function (e) {
+      if (!e.pos || !!e.inside !== inside) { return; }
+      var s = screen(e.pos);
+      var w = ctx.measureText((e.name || "") + (e.dead ? " (dead)" : "")).width + 6;
+      taken.push({ x: s.x - w / 2, y: s.y - 22, w: w, h: 16 });
+      taken.push({ x: s.x - 8, y: s.y - 8, w: 16, h: 16 });
+    });
+    (mapData.doors || []).filter(function (d) { return !!d.inside === inside; }).forEach(function (d) {
+      var s = screen([d.x, d.z]);
+      var w = ctx.measureText(d.main ? "Main entrance" : "Fire exit").width + 6;
+      taken.push({ x: s.x - w / 2, y: s.y - 5, w: w, h: 27 });
+    });
+    if (!inside && g.ship) {
+      var sh = screen(g.ship);
+      taken.push({ x: sh.x - 14, y: sh.y - 7, w: 28, h: 29 });
+    }
+    var free = function (r) {
+      for (var k = 0; k < taken.length; k++) {
+        var t = taken[k];
+        if (r.x < t.x + t.w && t.x < r.x + r.w && r.y < t.y + t.h && t.y < r.y + r.h) { return false; }
+      }
+      return true;
+    };
+    var shown = liveItems().filter(function (it) { return it.p && !!it.i === inside; }).map(function (it) {
+      return { it: it, s: screen(it.p) };
+    }).filter(function (o) { return o.s.x > -60 && o.s.x < cssW + 60 && o.s.y > -30 && o.s.y < cssH + 30; });
+    shown.forEach(function (o) {
+      var s = o.s;
       ctx.beginPath();
       ctx.moveTo(s.x, s.y - 4); ctx.lineTo(s.x + 4, s.y); ctx.lineTo(s.x, s.y + 4); ctx.lineTo(s.x - 4, s.y);
       ctx.closePath();
@@ -1487,7 +1547,16 @@ function drawMapPanel(panel, which, problem, both) {
       ctx.lineWidth = 1;
       ctx.strokeStyle = "#000";
       ctx.stroke();
-      if (mapZoom >= 2.5) { label(s, it.n + (it.v ? " ($" + it.v + ")" : ""), "#dcc2f2", true); }
+      panel.items.push({ x: s.x, y: s.y, text: itemText(o.it) });
+    });
+    shown.sort(function (a, b) { return (b.it.v || 0) - (a.it.v || 0); }).forEach(function (o) {
+      var text = itemText(o.it);
+      var w = ctx.measureText(text).width + 6;
+      var r = { x: o.s.x - w / 2, y: o.s.y + 6, w: w, h: 15 };
+      if (free(r)) {
+        taken.push(r);
+        label(o.s, text, "#dcc2f2", true);
+      }
     });
   }
   enemies.filter(function (e) { return e.pos && !!e.inside === inside; }).forEach(function (e) {

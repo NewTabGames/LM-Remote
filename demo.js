@@ -38,7 +38,7 @@ export var demo = {
   state: {
     menuOpen: false,
     toggles: { GodMode: true, NightVision: true, PlayerESP: true, EnemyESP: true, SpectatePlayer: false, MiniCam: true, DemiGod: true },
-    targets: { spectating: -1, miniCam: 1, demiGod: [1], controlling: "Hoarding bug", controlTarget: 1, aiDriving: false },
+    targets: { spectating: -1, miniCam: 1, demiGod: [1], controlling: "Loot Bug", controlTarget: 1, aiDriving: false },
     settings: { f_movementSpeed: 4.6, f_jumpForce: 15.2, f_fov: 90, i_menuFontSize: 14, b_FPSCounter: false, b_NoFog: true },
     game: { inRound: true, landed: true, inShipPhase: false, moon: "41 Experimentation", isHost: true, credits: 360, quota: 130, fulfilled: 84, daysLeft: 2, localName: "You", alive: true, health: 100, position: [12.5, -219.3, 64.1] },
     players: [
@@ -47,9 +47,9 @@ export var demo = {
       { id: 2, clientId: 2, name: "Other", dead: true, health: 0, local: false, inside: false }
     ],
     enemies: [
-      { id: 101, name: "Hoarding bug", dead: false, inside: true, distance: 14 },
+      { id: 101, name: "Loot Bug", dead: false, inside: true, distance: 14 },
       { id: 102, name: "Bracken", dead: false, inside: true, distance: 38 },
-      { id: 103, name: "Eyeless dog", dead: false, inside: false, distance: 120 }
+      { id: 103, name: "Eyeless Dog", dead: false, inside: false, distance: 120 }
     ]
   }
 };
@@ -84,10 +84,10 @@ demo.state.settings.f_enemyKillDistance = 15;
 
 // Sample in-game tools (the real lists come from the game once a lobby is loaded).
 demo.catalog.hacks.X_SpawnEnemy = { name: "Spawn Enemy (host)", category: "Enemies", group: "Enemy spawner", toggle: false, action: true,
-  args: [{ name: "Enemy", kind: "enum", options: ["Blob", "Flowerman", "Hoarding bug", "Jester", "Masked", "Thumper"] }, { name: "Amount", kind: "number", integer: true, optional: true, hint: "1" }, { name: "Outside", kind: "bool" }] };
+  args: [{ name: "Enemy", kind: "enum", options: ["Bracken", "Loot Bug", "Hygrodere", "Jester", "Masked", "Thumper"] }, { name: "Amount", kind: "number", integer: true, optional: true, hint: "1" }, { name: "Outside", kind: "bool" }] };
 demo.catalog.hacks.X_KillEnemy = { name: "Kill Enemy", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }] };
 demo.catalog.hacks.X_StunEnemy = { name: "Stun Enemy", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }] };
-demo.catalog.hacks.X_StealItems = { name: "Steal Items Enemy", category: "Enemies", group: "Enemies", only: "Hoarding bug", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }] };
+demo.catalog.hacks.X_StealItems = { name: "Steal Items Enemy", category: "Enemies", group: "Enemies", only: "HoarderBugAI", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }] };
 demo.catalog.hacks.X_SpawnItem = { name: "Spawn Item (host)", category: "Server", group: "Spawning (host)", toggle: false, action: true,
   args: [{ name: "Item", kind: "enum", options: [] }, { name: "Amount", kind: "number", integer: true, optional: true, hint: "1" }, { name: "Scrap Value", kind: "number", integer: true, optional: true, hint: "random" }] };
 demo.catalog.hacks.AggroHunt = { name: "Aggro Hunt", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };
@@ -96,13 +96,13 @@ demo.catalog.settings.b_StealthMode = { name: "Stealth Mode", type: "bool" };
 demo.state.settings.b_StealthMode = false;
 // Monster types, so monster-specific buttons can be matched (the real game sends these).
 (demo.state.enemies || []).forEach(function (e) {
-  e.type = e.name === "Hoarding bug" ? "HoarderBugAI" : e.name === "Eyeless dog" ? "MouthDogAI" : e.name === "Bracken" ? "FlowermanAI" : "EnemyAI";
+  e.type = e.name === "Loot Bug" ? "HoarderBugAI" : e.name === "Eyeless Dog" ? "MouthDogAI" : e.name === "Bracken" ? "FlowermanAI" : "EnemyAI";
 });
 demo.catalog.hacks.X_StealItems.only = "HoarderBugAI";
 demo.catalog.hacks.AggroHunt.only = "MouthDogAI";
 // The real Troll / Players / Server sections (same sizes as the game sends), to check the layout.
 var realSections = [
-  ["Troll", "Monsters", "Force Tentacle Attack,Spawn Hoarding Bug Infestation,Spawn Masked Enemy", ""],
+  ["Troll", "Monsters", "Force Tentacle Attack,Spawn Loot Bug Infestation,Spawn Masked Enemy", ""],
   ["Troll", "Ship & Facility", "Eject Everyone,Open Ship Door Space,Toggle Factory Lights,Toggle Mineshaft Elevator,Toggle Ship Lights", "Open Ship Door Space"],
   ["Troll", "Shotguns", "Shoot All Shotguns,Spam Shoot All Shotguns", "Spam Shoot All Shotguns"],
   ["Troll", "Sounds", "PJ Spammer,Slide Taunt,Toggle Car Horn,Toggle Deposit Desk Door Sound,Toggle Ship Horn,Toggle Terminal Sound", "*"],
@@ -179,10 +179,12 @@ demo.state.players[2].pos = [30, -10];
 demo.state.enemies[0].pos = [-55, -28];
 demo.state.enemies[1].pos = [20, 50];
 demo.state.enemies[2].pos = [-120, 60];
-demo.state.enemies.push({ id: 104, name: "Docile Locust Bees", type: "DocileLocustBeesAI", dead: false, inside: false, distance: 67, pos: [-90, 30] });
+demo.state.enemies.push({ id: 104, name: "Roaming Locusts", type: "DocileLocustBeesAI", dead: false, inside: false, distance: 67, pos: [-90, 30] });
 demo.state.items = [
   { n: "Large axle", v: 52, i: true, p: [-70, -35] }, { n: "Gold bar", v: 160, i: true, p: [40, 10] },
-  { n: "Brass bell", v: 63, i: true, p: [-20, -60] }, { n: "Whoopie cushion", v: 9, i: false, p: [-30, 25] }
+  { n: "Brass bell", v: 63, i: true, p: [-20, -60] }, { n: "Whoopie cushion", v: 9, i: false, p: [-30, 25] },
+  { n: "Cash register", v: 120, i: true, p: [41, 11] }, { n: "Toy robot", v: 70, i: true, p: [42, 9] },
+  { n: "Shovel", v: 0, i: true, p: [-68, -33] }, { n: "Magnifying glass", v: 44, i: false, p: [-29, 27] }
 ];
 
 demo.catalog.hacks.X_TargetPlayer ={ name: "Target Player (anger at)", category: "Enemies", group: "Enemies", toggle: false, action: true, args: [{ name: "Enemy", kind: "enemy" }, { name: "Player", kind: "player" }] };

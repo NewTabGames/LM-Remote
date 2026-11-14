@@ -149,6 +149,7 @@ input:focus, select:focus { border-color: var(--accent); }
 .map-panels.both { display: flex; flex-wrap: wrap; margin: 0 -4px; }
 .map-panels.both .map-panel { flex: 1 1 320px; min-width: 0; margin: 0 4px 8px; }
 .map-panel-title { font-size: 13px; color: var(--muted); margin: 0 0 4px 2px; }
+.map-tip { position: absolute; z-index: 2; pointer-events: none; white-space: pre; background: #111; color: #dcc2f2; border: 1px solid #c792ea; border-radius: var(--r-sm); padding: 4px 8px; font-size: 13px; line-height: 1.4; }
 .map-empty { position: absolute; left: 0; right: 0; top: 45%; text-align: center; color: var(--muted); padding: 0 16px; }
 .map-legend { display: flex; flex-wrap: wrap; margin-top: 8px; font-size: 13px; color: var(--muted); }
 .map-legend span { margin: 0 14px 4px 0; white-space: nowrap; }

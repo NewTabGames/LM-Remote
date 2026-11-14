@@ -911,7 +911,7 @@ function renderStrip() {
   // Every box has a fixed width (wide enough for its longest value), and they're always in the same order,
   // so nothing shifts around when a number changes or someone picks something up.
   function chip(label, value, width) {
-    strip.appendChild(el("span", { class: "chip", style: width ? "width:" + width + "ch" : "" }, [label + " ", el("b", { text: String(value) })]));
+    strip.appendChild(el("span", { class: "chip", style: width ? "min-width:" + width + "ch" : "" }, [label + " ", el("b", { text: String(value) })]));
   }
   if (!state || !state.game) { chip("Status", currentDev ? "waiting for game" : "-"); return; }
   var g = state.game;
@@ -925,7 +925,7 @@ function renderStrip() {
   chip("Credits", g.credits, 14);
   chip("Quota", g.quota !== undefined ? g.fulfilled + " / " + g.quota : "-", 18);
   chip("Days left", g.daysLeft !== undefined ? g.daysLeft : "-", 13);
-  chip("Host", g.isHost ? "yes" : "no", 10);
+  chip("Host", g.isHost ? "yes" : "no", 11);
   chip("Stealth", state.settings && state.settings.b_StealthMode ? "on" : "off", 13);
 }
 

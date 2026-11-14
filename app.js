@@ -434,7 +434,10 @@ function menuOutdated(info) {
 
 function loadRequiredVersion() {
   if (DEMO) { return; } // index.html?demo&outdated shows the lock instead
-  fetch("https://raw.githubusercontent.com/NewTabGames/LethalMenu/main/required-version.txt?t=" + Date.now())
+  // GitHub's API has the file as it is now; the raw file server can be 5+ minutes behind, so it's only the backup.
+  var raw = "https://raw.githubusercontent.com/NewTabGames/LethalMenu/main/required-version.txt";
+  fetch("https://api.github.com/repos/NewTabGames/LethalMenu/contents/required-version.txt", { headers: { Accept: "application/vnd.github.raw" } })
+    .then(function (r) { return r.ok ? r : fetch(raw); }, function () { return fetch(raw); })
     .then(function (r) { return r.ok ? r.text() : null; })
     .then(function (t) { if (t && /\d/.test(t)) { requiredVersion = t.trim(); refreshOnline(); } })
     .catch(function () { /* can't check: don't lock anything */ });

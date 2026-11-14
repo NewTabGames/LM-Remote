@@ -7,7 +7,7 @@ var enemy = { name: "E", kind: "enemy" };
 
 export var demo = {
   catalog: {
-    version: "v1.4.7",
+    version: "v1.0.0",
     hacks: {
       GodMode: t("God Mode", "Self"), GhostMode: t("Ghost Mode", "Self"), SuperJump: t("Super Jump", "Self"),
       SuperSpeed: t("Super Speed", "Self"), NoClip: t("No Clip", "Self"), UnlimitedStamina: t("Unlimited Stamina", "Self"),

@@ -118,6 +118,14 @@ input:focus, select:focus { border-color: var(--accent); }
 .pending-item .code { font: bold 22px/1 Consolas, "Courier New", monospace; letter-spacing: 3px; margin: 6px 12px; }
 .pending-item .btn { margin: 4px 0 4px 8px; }
 
+/* Outdated menu on the chosen PC: only the update message (and the footer, to remove the PC) */
+.outdated { display: none; }
+#device-view.locked > * { display: none !important; }
+#device-view.locked > .outdated { display: block !important; margin: 40px 16px; padding: 24px 16px; background: #000; border: 1px solid var(--line); text-align: center; font-size: 18px; }
+#device-view.locked > .footer { display: flex !important; }
+.outdated p { margin: 0 0 12px; }
+.outdated a { color: #8cbfff; word-break: break-all; }
+
 /* Game info line */
 .strip { display: flex; flex-wrap: wrap; padding: 12px 16px 2px; }
 .chip { background: var(--panel); border: 1px solid var(--line); padding: 4px 10px; margin: 0 6px 6px 0; font-size: 13px; border-radius: 999px; white-space: nowrap; color: var(--muted); overflow: hidden; text-overflow: ellipsis; -webkit-box-sizing: border-box; box-sizing: border-box; max-width: 100%; -webkit-flex: none; flex: none; }

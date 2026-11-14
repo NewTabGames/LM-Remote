@@ -408,8 +408,50 @@ function liveItems() { return pcOnline() ? ((state && state.items) || []) : []; 
 
 function noEnemiesText() { return pcOnline() ? "No living enemies right now" : "PC is offline: no enemies shown"; }
 
+// ---------- version lock ----------
+// The lowest menu version still allowed lives in the menu's GitHub repo (required-version.txt). A PC running an
+// older menu, or the old Lethal Menu (no "Reborn" in its version), can't be used from here: the page only shows
+// the update link. If the file can't be read, nothing is locked.
+var MENU_REPO = "https://github.com/NewTabGames/LethalMenu";
+var requiredVersion = null;
+
+function versionParts(v) { return String(v || "").replace(/^\s*v/i, "").trim().split(".").map(function (n) { return parseInt(n, 10) || 0; }); }
+
+function olderThan(a, b) {
+  var x = versionParts(a);
+  var y = versionParts(b);
+  for (var i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] || 0) !== (y[i] || 0)) { return (x[i] || 0) < (y[i] || 0); }
+  }
+  return false;
+}
+
+function menuOutdated(info) {
+  if (!requiredVersion || !info || !info.version) { return false; }
+  var m = /^Reborn\s+(.+)$/.exec(info.version);
+  return !m || olderThan(m[1], requiredVersion);
+}
+
+function loadRequiredVersion() {
+  if (DEMO) { return; } // index.html?demo&outdated shows the lock instead
+  fetch("https://raw.githubusercontent.com/NewTabGames/LethalMenu/main/required-version.txt?t=" + Date.now())
+    .then(function (r) { return r.ok ? r.text() : null; })
+    .then(function (t) { if (t && /\d/.test(t)) { requiredVersion = t.trim(); refreshOnline(); } })
+    .catch(function () { /* can't check: don't lock anything */ });
+}
+loadRequiredVersion();
+setInterval(loadRequiredVersion, 600000);
+
 function refreshOnline() {
   var info = currentDev ? deviceInfo[currentDev] : null;
+  var outdated = menuOutdated(info);
+  $("device-view").classList.toggle("locked", outdated);
+  var lock = $("outdated-note");
+  if (outdated) {
+    lock.innerHTML = "";
+    lock.appendChild(el("p", { text: "Outdated menu on this PC (" + info.version + "). Please update to v" + requiredVersion.replace(/^v/i, "") + " or newer here:" }));
+    lock.appendChild(el("a", { href: MENU_REPO, target: "_blank", rel: "noopener", text: MENU_REPO }));
+  }
   var online = isOnline(info);
   if (wasOnline !== null && online !== wasOnline) { applyState(true); } // went offline/online: clear or bring back the enemies
   wasOnline = online;
@@ -1475,7 +1517,9 @@ if (DEMO) {
     deviceIndex = { demo: { name: "Demo PC" } };
     // index.html?demo&offline shows the demo PC as offline (what the panel looks like when the game is closed).
     var demoOffline = /[?&]offline\b/.test(location.search);
-    deviceInfo = { demo: { name: "Demo PC", online: !demoOffline, lastSeen: Date.now() - (demoOffline ? 600000 : 0), version: m.demo.catalog.version } };
+    deviceInfo = { demo: { name: "Demo PC", online: !demoOffline, lastSeen: Date.now() - (demoOffline ? 600000 : 0), version: "Reborn " + m.demo.catalog.version } };
+    // index.html?demo&outdated: the demo PC runs an old menu, so the page is locked.
+    if (/[?&]outdated\b/.test(location.search)) { requiredVersion = "1.0.0"; deviceInfo.demo.version = "v1.4.8"; }
     $("account-name").textContent = "demo_user";
     serverOffset = 0;
     currentDev = "demo";

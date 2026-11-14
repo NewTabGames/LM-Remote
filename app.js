@@ -1020,7 +1020,16 @@ function renderEnemies(enemies) {
   ui.enemyMeta = {};
   if (!box) { return; }
   box.innerHTML = "";
-  if (!enemies.length) { box.appendChild(el("div", { class: "empty-list", text: noEnemiesText() + "." })); return; }
+  if (!enemies.length) {
+    box.appendChild(el("div", { class: "empty-list", text: noEnemiesText() + "." }));
+    // The per-enemy actions (Teleport, Hunt, Kill...) live on the enemy cards; say so, so they aren't "missing".
+    var onCards = hackEntries().filter(function (h) { return isSingleArg(h, "enemy") || isEnemyPlayerPair(h); })
+      .map(enemyButtonName).sort(byText);
+    if (onCards.length) {
+      box.appendChild(el("div", { class: "empty-list", text: "Each enemy gets a card with: " + onCards.join(", ") + "." }));
+    }
+    return;
+  }
   var byName = function (a, b) { return byText(enemyButtonName(a), enemyButtonName(b)); };
   var actions = hackEntries().filter(function (h) { return isSingleArg(h, "enemy"); }).sort(byName);
   var pairActions = hackEntries().filter(isEnemyPlayerPair).sort(byName);

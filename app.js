@@ -389,8 +389,9 @@ function selectDevice(id) {
   refreshOnline();
 }
 
-// The last enemy list a PC sent goes stale the moment it goes offline (those monsters may be long dead or the
-// round over), so while it's offline the website shows no enemies, no hunts, and no monster dots on the map.
+// Everything the game last sent about the round goes stale the moment the PC goes offline (the game may be
+// closed, the lobby gone), so while it's offline the website shows no players, no enemies, no hunts, no game
+// info and nothing on the map. Settings and on/off switches still show (they're the menu's, not the round's).
 var wasOnline = null;
 
 function pcOnline() { return isOnline(currentDev ? deviceInfo[currentDev] : null); }
@@ -398,6 +399,12 @@ function pcOnline() { return isOnline(currentDev ? deviceInfo[currentDev] : null
 function liveEnemies() {
   return pcOnline() ? ((state && state.enemies) || []).filter(function (e) { return !e.dead; }) : [];
 }
+
+function livePlayers() { return pcOnline() ? ((state && state.players) || []) : []; }
+
+function liveGame() { return pcOnline() ? ((state && state.game) || {}) : {}; }
+
+function liveItems() { return pcOnline() ? ((state && state.items) || []) : []; }
 
 function noEnemiesText() { return pcOnline() ? "No living enemies right now" : "PC is offline: no enemies shown"; }
 
@@ -498,7 +505,7 @@ function fitsEnemy(h, e) {
 function enemyTabTarget() {
   var v = ui.enemyPlayerSelect ? ui.enemyPlayerSelect.value : enemyTabPlayer;
   if (v === "" || v == null) { return null; }
-  return ((state && state.players) || []).filter(function (p) { return String(p.id) === String(v); })[0] || null;
+  return livePlayers().filter(function (p) { return String(p.id) === String(v); })[0] || null;
 }
 
 // Re-draw the enemy cards (the picked player changed, or moved inside/outside).
@@ -592,7 +599,7 @@ function buildContent() {
     var has = function (v) { return v !== "" && Array.prototype.some.call(ps.options, function (o) { return o.value === v; }); };
     if (has(enemyTabPlayer)) { ps.value = enemyTabPlayer; }
     else {
-      var other = ((state && state.players) || []).filter(function (p) { return !p.local && !p.dead; }).sort(function (a, b) { return byText(a.name, b.name); })[0];
+      var other = livePlayers().filter(function (p) { return !p.local && !p.dead; }).sort(function (a, b) { return byText(a.name, b.name); })[0];
       if (other && has(String(other.id))) { ps.value = String(other.id); }
       enemyTabPlayer = ps.value;
     }
@@ -734,7 +741,7 @@ function argControl(arg, box) {
     var mine = el("button", {
       class: "btn small", type: "button", text: "My position",
       onclick: function () {
-        var p = state && state.game && state.game.position;
+        var p = liveGame().position;
         if (!p) { toast("Position unknown (not in a round?)", "fail"); return; }
         xyz.forEach(function (input, i) { input.value = p[i]; });
       }
@@ -842,7 +849,7 @@ function applyState(force) {
     sl.label.textContent = sl.shown(settings[key]);
   });
 
-  var players = state.players || [];
+  var players = livePlayers();
   var enemies = liveEnemies();
   var sigP = JSON.stringify([players, state.targets || null]);
   // Which enemies exist (not how far away they are): the cards are only rebuilt when this changes.
@@ -850,7 +857,7 @@ function applyState(force) {
   var sigE = JSON.stringify([enemies.map(function (e) { return [e.id, e.name, e.inside]; }), chosen ? [chosen.id, chosen.inside, chosen.dead] : null]);
   fillSelects(ui.playerSelects, players.map(function (p) {
     return { value: p.id, name: p.name, text: p.name + (p.local ? " (you)" : "") + (p.dead ? " (dead)" : "") };
-  }), "No players (join a lobby first)");
+  }), pcOnline() ? "No players (join a lobby first)" : "PC is offline");
   fillSelects(ui.enemySelects, enemies.map(function (e) {
     return { value: e.id, name: e.name, text: e.name + " (" + e.distance + "m" + (e.inside ? ", inside" : "") + ")" };
   }), noEnemiesText());
@@ -913,6 +920,7 @@ function renderStrip() {
   function chip(label, value, width) {
     strip.appendChild(el("span", { class: "chip", style: width ? "min-width:" + width + "ch" : "" }, [label + " ", el("b", { text: String(value) })]));
   }
+  if (currentDev && state && !pcOnline()) { chip("Status", "PC is offline"); return; }
   if (!state || !state.game) { chip("Status", currentDev ? "waiting for game" : "-"); return; }
   var g = state.game;
   if (!g.inRound) { chip("Status", "Main menu / lobby list"); return; }
@@ -945,7 +953,8 @@ function playerChip(p) {
 var NOT_ON_SELF = { SpectatePlayer: true, MiniCam: true };
 
 function targetsOf() {
-  var t = (state && state.targets) || {};
+  // Offline: what the game was pointing at (cameras, control, hunts) is stale too, so nothing is "running".
+  var t = (pcOnline() && state && state.targets) || {};
   return { spectating: t.spectating === undefined ? -1 : t.spectating, miniCam: t.miniCam === undefined ? -1 : t.miniCam, demiGod: t.demiGod || [], controlling: pcOnline() ? (t.controlling || null) : null,
     controlTarget: t.controlTarget === undefined ? -1 : t.controlTarget, aiDriving: !!t.aiDriving, hunts: pcOnline() ? (t.hunts || []) : [] };
 }
@@ -981,7 +990,7 @@ var runningBarSig = "";
 
 function renderRunningBar() {
   var bar = $("running-bar");
-  var players = (state && state.players) || [];
+  var players = livePlayers();
   var targets = targetsOf();
   var toggles = (state && state.toggles) || {};
   // Rebuild only when something shown here changed, so an open dropdown is not closed by live updates.
@@ -1034,7 +1043,7 @@ function renderPlayers(players) {
   box.innerHTML = "";
   box.className = "cards";
   var targets = targetsOf();
-  if (!players.length) { box.appendChild(el("div", { class: "empty-list", text: "No players (join a lobby first)." })); return; }
+  if (!players.length) { box.appendChild(el("div", { class: "empty-list", text: (pcOnline() ? "No players (join a lobby first)." : "PC is offline: no players shown.") })); return; }
   var actions = hackEntries().filter(function (h) { return isSingleArg(h, "player"); });
   actions.sort(function (a, b) { return byText(shortName(a.name), shortName(b.name)); });
   players.slice().sort(function (a, b) { return byText(a.name, b.name); }).forEach(function (p) {
@@ -1317,8 +1326,8 @@ window.addEventListener("resize", function () { drawMap(); });
 
 function drawMap() {
   if (!mapUi || activeTab !== "Map" || !document.body.contains(mapUi.box)) { return; }
-  var g = (state && state.game) || {};
-  var players = (state && state.players) || [];
+  var g = liveGame();
+  var players = livePlayers();
   var me = players.filter(function (p) { return p.local; })[0];
   var maps = mapMode === "both" ? ["outside", "inside"] : [mapMode === "auto" ? (me && me.inside ? "inside" : "outside") : mapMode];
   Object.keys(mapUi.buttons).forEach(function (k) { mapUi.buttons[k].className = "btn small" + (k === mapMode ? " primary" : ""); });
@@ -1333,7 +1342,8 @@ function drawMap() {
   mapUi.box.className = "map-panels" + (maps.length > 1 ? " both" : "");
 
   var problem = null;
-  if (!g.inRound || g.inShipPhase || !g.landed) { problem = "Land on a moon to see the map."; }
+  if (currentDev && !pcOnline()) { problem = "PC is offline."; }
+  else if (!g.inRound || g.inShipPhase || !g.landed) { problem = "Land on a moon to see the map."; }
   else if (!mapData) { problem = "Waiting for the map from the game (it's made a few seconds after landing)."; }
   else if (g.mapSeed !== undefined && mapData.seed !== g.mapSeed) { problem = "Waiting for this moon's map..."; }
   mapUi.info.textContent = problem ? "" : mapData.moon + (maps.length > 1 ? " | Outside and inside" : " | " + (maps[0] === "inside" ? "Inside the facility" : "Outside") + (mapMode === "auto" ? " (following you)" : ""));
@@ -1348,8 +1358,8 @@ function drawMap() {
 }
 
 function drawMapPanel(panel, which, problem, both) {
-  var g = (state && state.game) || {};
-  var players = (state && state.players) || [];
+  var g = liveGame();
+  var players = livePlayers();
   var enemies = liveEnemies();
   var me = players.filter(function (p) { return p.local; })[0];
 
@@ -1422,7 +1432,7 @@ function drawMapPanel(panel, which, problem, both) {
   }
   if (mapItems) {
     // Small purple diamonds; names (and value) once zoomed in enough to read them.
-    ((state && state.items) || []).filter(function (it) { return it.p && !!it.i === inside; }).forEach(function (it) {
+    liveItems().filter(function (it) { return it.p && !!it.i === inside; }).forEach(function (it) {
       var s = screen(it.p);
       ctx.beginPath();
       ctx.moveTo(s.x, s.y - 4); ctx.lineTo(s.x + 4, s.y); ctx.lineTo(s.x, s.y + 4); ctx.lineTo(s.x - 4, s.y);

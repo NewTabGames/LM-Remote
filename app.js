@@ -11,7 +11,16 @@ import {
 import { firebaseConfig } from "./firebase-config.js";
 
 // Tabs are in a fixed order; everything inside them (sections, features, players, enemies, dropdowns) is A-Z.
-var TAB_ORDER = ["Visuals", "Troll", "Self", "Players", "Enemies", "Map", "Server", "Other", "Settings"];
+var TAB_ORDER = ["Visuals", "Troll", "Self", "Players", "Enemies", "Map", "Server", "Settings"];
+
+// There is no "Other" tab. A feature the menu didn't give a tab (an older menu version, or a new feature) goes
+// to the tab its name fits: anything about enemies to Enemies, about players to Players, the rest to Self.
+function tabFor(key, category) {
+  if (category && category !== "Other" && TAB_ORDER.indexOf(category) >= 0) { return category; }
+  if (/Enem|Hunt|Monster/i.test(key)) { return "Enemies"; }
+  if (/Player/i.test(key)) { return "Players"; }
+  return "Self";
+}
 // Tabs that are always shown, even when no feature belongs to them.
 var FIXED_TABS = { Players: true, Enemies: true, Map: true, Settings: true };
 // index.html?demo shows the panel with sample data, without signing in (handy to check the layout on a device).
@@ -36,6 +45,7 @@ var catalog = null;
 var state = null;
 var lastResultSeen = undefined;
 var activeTab = loadPref("tab") || "Self";
+if (TAB_ORDER.indexOf(activeTab) < 0) { activeTab = "Enemies"; } // e.g. the old "Other" tab was open last time
 var search = "";
 var ui = freshUi();
 var pendingToggles = {};
@@ -435,8 +445,10 @@ function hackEntries() {
   var hacks = (catalog && catalog.hacks) || {};
   return Object.keys(hacks).map(function (key) {
     var h = hacks[key];
+    var tab = tabFor(key, h.category);
+    var placed = tab === h.category;
     return {
-      key: key, name: h.name || key, category: h.category || "Other", group: h.group || h.category || "Other",
+      key: key, name: h.name || key, category: tab, group: placed && h.group && h.group !== "Other" ? h.group : tab,
       toggle: !!h.toggle, action: !!h.action, args: h.args || [], slider: h.slider || null, only: h.only || null
     };
   }).sort(function (a, b) { return byText(a.name, b.name); });

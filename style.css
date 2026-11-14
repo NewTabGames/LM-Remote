@@ -191,10 +191,12 @@ input:focus, select:focus { border-color: var(--accent); }
 .row-args .run { margin: 0 0 8px; }
 
 /* Player and enemy boxes */
-/* Same idea as the sections, but a card is never split: cards stack down each column without gaps. */
-.cards { -webkit-column-width: 270px; column-width: 270px; -webkit-column-gap: 8px; column-gap: 8px; }
-@media (max-width: 560px) { .cards { -webkit-column-count: 1; column-count: 1; } }
-.entity { display: inline-block; width: 100%; vertical-align: top; margin: 0 0 8px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; -webkit-column-break-inside: avoid; break-inside: avoid; }
+/* Cards are dealt left to right, each into the shortest column (app.js packCards), so they read like rows
+   and no column is left with a hole under it. */
+.cards.packed { display: -webkit-box; display: -webkit-flex; display: flex; -webkit-align-items: flex-start; align-items: flex-start; }
+.card-col { -webkit-box-flex: 1; -webkit-flex: 1 1 0; flex: 1 1 0; min-width: 0; }
+.card-col + .card-col { margin-left: 8px; }
+.entity { display: block; margin: 0 0 8px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; -webkit-column-break-inside: avoid; break-inside: avoid; }
 .entity.dead { opacity: 0.55; }
 .entity-head { display: flex; justify-content: space-between; align-items: baseline; background: var(--head); border-bottom: 1px solid var(--line); padding: 8px 10px; }
 .entity-name { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
@@ -270,5 +272,3 @@ input:focus, select:focus { border-color: var(--accent); }
 .pick-label { color: var(--muted); font-size: 13px; margin: 2px 10px 2px 0; }
 .pick-bar select { flex: 1 1 180px; max-width: 320px; min-width: 0; }
 .entity-sub { padding: 6px 10px 0; margin-top: 2px; border-top: 1px solid var(--line-2); font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
-/* Messages in an empty card list span the whole width (not split into columns) */
-.cards .empty-list { -webkit-column-span: all; column-span: all; }

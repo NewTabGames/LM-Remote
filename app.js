@@ -999,6 +999,7 @@ function renderPlayers(players) {
   var box = ui.playersBox;
   if (!box) { return; }
   box.innerHTML = "";
+  box.className = "cards";
   var targets = targetsOf();
   if (!players.length) { box.appendChild(el("div", { class: "empty-list", text: "No players (join a lobby first)." })); return; }
   var actions = hackEntries().filter(function (h) { return isSingleArg(h, "player"); });
@@ -1015,7 +1016,48 @@ function renderPlayers(players) {
       el("div", { class: "entity-actions" }, buttons)
     ]));
   });
+  packCards(box);
 }
+
+// Player/enemy cards: as many columns as fit (each at least CARD_MIN wide), and each card in turn goes into
+// the shortest column. Cards keep reading left to right, and no column ends up with a big hole under it.
+var CARD_MIN = 270;
+var CARD_GAP = 8;
+
+function packCards(box) {
+  if (!box) { return; }
+  var cards = [].slice.call(box.querySelectorAll(".entity"));
+  if (!cards.length) { return; } // "No players" style messages stay as they are
+  // Remember the A-Z order the first time, so re-dealing after a resize keeps it (the columns change the DOM order).
+  cards.forEach(function (card, n) { if (!card.getAttribute("data-order")) { card.setAttribute("data-order", String(n)); } });
+  cards.sort(function (x, y) { return Number(x.getAttribute("data-order")) - Number(y.getAttribute("data-order")); });
+  var width = box.clientWidth;
+  var count = Math.max(1, Math.floor((width + CARD_GAP) / (CARD_MIN + CARD_GAP)));
+  box.innerHTML = "";
+  var cols = [];
+  var heights = [];
+  for (var i = 0; i < count; i++) {
+    cols.push(box.appendChild(el("div", { class: "card-col" })));
+    heights.push(0);
+  }
+  cards.forEach(function (card) {
+    var best = 0;
+    for (var j = 1; j < count; j++) { if (heights[j] < heights[best]) { best = j; } }
+    cols[best].appendChild(card);
+    heights[best] += (card.offsetHeight || 1) + CARD_GAP;
+  });
+  box.className = "cards packed";
+  box.setAttribute("data-cols", String(count));
+}
+
+// Re-deal the cards only when the number of columns that fit changes.
+window.addEventListener("resize", function () {
+  [ui.playersBox, ui.enemiesBox].forEach(function (box) {
+    if (!box || !box.getAttribute("data-cols")) { return; }
+    var fit = Math.max(1, Math.floor((box.clientWidth + CARD_GAP) / (CARD_MIN + CARD_GAP)));
+    if (String(fit) !== box.getAttribute("data-cols")) { packCards(box); }
+  });
+});
 
 function enemyMetaText(e) { return e.distance + "m" + (e.inside ? " | inside" : " | outside"); }
 
@@ -1024,6 +1066,7 @@ function renderEnemies(enemies) {
   ui.enemyMeta = {};
   if (!box) { return; }
   box.innerHTML = "";
+  box.className = "cards";
   if (!enemies.length) {
     box.appendChild(el("div", { class: "empty-list", text: noEnemiesText() + "." }));
     // The per-enemy actions (Teleport, Hunt, Kill...) live on the enemy cards; say so, so they aren't "missing".
@@ -1067,6 +1110,7 @@ function renderEnemies(enemies) {
       pairButtons.length ? el("div", { class: "entity-actions" }, pairButtons) : null
     ]));
   });
+  packCards(box);
 }
 
 // ---------- map ----------

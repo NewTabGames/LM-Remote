@@ -1228,6 +1228,7 @@ var mapImages = {};
 var mapUi = null;
 var mapMode = loadPref("mapMode") || "auto"; // auto = wherever you are; "outside", "inside", or "both" side by side
 var mapZoom = 1;
+var mapFollow = null; // "Follow" keeps this player (by clientId) in the middle; null = you
 var mapItems = loadPref("mapItems") !== "0"; // show items lying around (scrap etc.)
 
 // The game only sends positions (players, monsters, items) while someone has the Map tab open: this tells it.
@@ -1305,7 +1306,40 @@ function legendItem(color, text) {
   return el("span", {}, [el("i", { style: "background:" + color }), text]);
 }
 
-var MAP_MODES = [["auto", "Follow me"], ["outside", "Outside"], ["inside", "Inside"], ["both", "Both"]];
+var MAP_MODES = [["auto", "Follow: you"], ["outside", "Outside"], ["inside", "Inside"], ["both", "Both"]];
+
+// Who "Follow" is on: the chosen player while they're on the map, otherwise you.
+function followTarget(players) {
+  var me = players.filter(function (p) { return p.local; })[0];
+  if (mapFollow === null) { return me; }
+  var them = players.filter(function (p) { return !p.local && p.clientId === mapFollow && p.pos; })[0];
+  return them || me;
+}
+
+// Players "Follow" can switch to: you first, then everyone else on the map by name.
+function followChoices() {
+  return livePlayers().filter(function (p) { return p.local || p.pos; }).sort(function (a, b) {
+    return (b.local ? 1 : 0) - (a.local ? 1 : 0) || byText(a.name, b.name);
+  });
+}
+
+function followPlayer(p) {
+  mapFollow = !p || p.local ? null : p.clientId;
+  mapMode = "auto";
+  savePref("mapMode", "auto");
+  if (mapZoom < 2) { mapZoom = 2.5; } // zoomed all the way out there's nothing to follow
+  resetMapPan();
+  drawMap();
+}
+
+// Clicking "Follow" again moves on to the next player (and back round to you).
+function followNext() {
+  var choices = followChoices();
+  if (!choices.length) { return; }
+  var current = followTarget(livePlayers());
+  var i = choices.indexOf(current);
+  followPlayer(choices[(i + 1) % choices.length]);
+}
 
 function buildMap(content) {
   var bar = el("div", { class: "map-bar" });
@@ -1313,7 +1347,10 @@ function buildMap(content) {
   MAP_MODES.forEach(function (b) {
     buttons[b[0]] = bar.appendChild(el("button", {
       class: "btn small", type: "button", text: b[1],
-      onclick: function () { mapMode = b[0]; savePref("mapMode", b[0]); resetMapPan(); drawMap(); }
+      onclick: function () {
+        if (b[0] === "auto" && mapMode === "auto") { followNext(); return; }
+        mapMode = b[0]; savePref("mapMode", b[0]); resetMapPan(); drawMap();
+      }
     }));
   });
   bar.appendChild(el("button", { class: "btn small", type: "button", text: "Zoom out", onclick: function () { zoomMap(1 / 1.5); } }));
@@ -1343,7 +1380,14 @@ function makeMapPanel() {
   var tip = el("div", { class: "map-tip" });
   tip.style.display = "none";
   wrap.appendChild(tip);
-  var panel = { node: el("div", { class: "map-panel" }, [title, wrap]), canvas: canvas, wrap: wrap, empty: empty, title: title, which: "outside", scale: 1, items: [] };
+  var panel = { node: el("div", { class: "map-panel" }, [title, wrap]), canvas: canvas, wrap: wrap, empty: empty, title: title, which: "outside", scale: 1, items: [], players: [] };
+  // Click or tap a player's dot or name to follow them.
+  function playerAt(e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = e.clientX - rect.left;
+    var y = e.clientY - rect.top;
+    return panel.players.filter(function (p) { return Math.abs(p.x - x) <= 10 && y >= p.y - 22 && y <= p.y + 10; })[0];
+  }
   // Hover (mouse) or tap (touch) on item diamonds: every item there with its value, even the unlabelled ones.
   function showTip(e) {
     var rect = canvas.getBoundingClientRect();
@@ -1373,7 +1417,11 @@ function makeMapPanel() {
     drawMap();
   });
   canvas.addEventListener("pointerup", function (e) {
-    if (drag && drag.moved < 6) { showTip(e); }
+    if (drag && drag.moved < 6) {
+      var hit = playerAt(e);
+      if (hit) { drag = null; tip.style.display = "none"; followPlayer(hit.player); return; }
+      showTip(e);
+    }
     drag = null;
   });
   canvas.addEventListener("pointercancel", function () { drag = null; });
@@ -1403,9 +1451,12 @@ function drawMap() {
   if (!mapUi || activeTab !== "Map" || !document.body.contains(mapUi.box)) { return; }
   var g = liveGame();
   var players = livePlayers();
-  var me = players.filter(function (p) { return p.local; })[0];
-  var maps = mapMode === "both" ? ["outside", "inside"] : [mapMode === "auto" ? (me && me.inside ? "inside" : "outside") : mapMode];
+  var target = followTarget(players);
+  var maps = mapMode === "both" ? ["outside", "inside"] : [mapMode === "auto" ? (target && target.inside ? "inside" : "outside") : mapMode];
   Object.keys(mapUi.buttons).forEach(function (k) { mapUi.buttons[k].className = "btn small" + (k === mapMode ? " primary" : ""); });
+  var followName = !target || target.local ? "you" : target.name;
+  mapUi.buttons.auto.textContent = "Follow: " + followName;
+  mapUi.buttons.auto.title = mapMode === "auto" ? "Click again to follow the next player" : "";
   mapUi.itemsBtn.textContent = mapItems ? "Items: on" : "Items: off";
   mapUi.itemsBtn.className = "btn small" + (mapItems ? " primary" : "");
 
@@ -1421,7 +1472,7 @@ function drawMap() {
   else if (!g.inRound || g.inShipPhase || !g.landed) { problem = "Land on a moon to see the map."; }
   else if (!mapData) { problem = "Waiting for the map from the game (it's made a few seconds after landing)."; }
   else if (g.mapSeed !== undefined && mapData.seed !== g.mapSeed) { problem = "Waiting for this moon's map..."; }
-  mapUi.info.textContent = problem ? "" : mapData.moon + (maps.length > 1 ? " | Outside and inside" : " | " + (maps[0] === "inside" ? "Inside the facility" : "Outside") + (mapMode === "auto" ? " (following you)" : ""));
+  mapUi.info.textContent = problem ? "" : mapData.moon + (maps.length > 1 ? " | Outside and inside" : " | " + (maps[0] === "inside" ? "Inside the facility" : "Outside") + (mapMode === "auto" ? " (following " + followName + ")" : ""));
 
   maps.forEach(function (which, i) {
     var panel = mapUi.panels[i];
@@ -1461,9 +1512,11 @@ function drawMapPanel(panel, which, problem, both) {
   var scale = Math.min(cssW / grid.w, cssH / grid.h) * mapZoom;
   panel.scale = scale;
   function toGrid(pos) { return { x: (pos[0] - grid.x0) / grid.cell, y: grid.h - (pos[1] - grid.z0) / grid.cell }; }
-  // Zoomed in on "Follow me": keep you in the middle. Otherwise the map stays where you zoomed/dragged it.
+  // Zoomed in on "Follow": keep that player (you, unless you picked someone) in the middle. Otherwise the map
+  // stays where you zoomed/dragged it.
+  var target = followTarget(players);
   var centre = { x: grid.w / 2, y: grid.h / 2 };
-  if (mapMode === "auto" && mapZoom > 1 && me && me.pos && !me.dead && (me.inside ? "inside" : "outside") === which) { centre = toGrid(me.pos); }
+  if (mapMode === "auto" && mapZoom > 1 && target && target.pos && !(target.local && target.dead) && (target.inside ? "inside" : "outside") === which) { centre = toGrid(target.pos); }
   var pan = mapPans[which];
   var ox = cssW / 2 - (centre.x + pan.x) * scale;
   var oy = cssH / 2 - (centre.y + pan.y) * scale;
@@ -1565,8 +1618,18 @@ function drawMapPanel(panel, which, problem, both) {
     label(s, e.name, "#f2a19c");
   });
   // Players last so they sit on top; you on top of everyone.
+  panel.players = [];
   players.filter(function (p) { return p.pos && !!p.inside === inside; }).sort(function (a, b) { return (a.local ? 1 : 0) - (b.local ? 1 : 0); }).forEach(function (p) {
     var s = screen(p.pos);
+    panel.players.push({ x: s.x, y: s.y, player: p });
+    if (mapMode === "auto" && p === target && !p.local) {
+      // Ring around the player you're following.
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 11, 0, Math.PI * 2);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#ffffff";
+      ctx.stroke();
+    }
     if (p.dead) {
       ctx.lineWidth = 2.5;
       ctx.strokeStyle = "#8a8a8a";

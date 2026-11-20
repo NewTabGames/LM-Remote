@@ -198,6 +198,8 @@ demo.state.hazards = [
   { t: "mine", on: false, i: true, p: [36, -30, -200] }, { t: "spikes", on: true, i: true, p: [-75, -45, -200] },
   { t: "turret", on: true, i: true, p: [40, 0, -192] }
 ];
+// An Old Bird still asleep in its nest outside.
+demo.state.dormant = [{ n: "Old Bird", i: false, p: [-70, 10, 5] }];
 demo.state.items = [
   { n: "Large axle", v: 52, i: true, p: [-70, -35, -200] }, { n: "Gold bar", v: 160, i: true, p: [40, 10, -200] },
   { n: "Brass bell", v: 63, i: true, p: [-20, -60, -193] }, { n: "Whoopie cushion", v: 9, i: false, p: [-30, 25] },

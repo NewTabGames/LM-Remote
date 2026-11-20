@@ -408,6 +408,9 @@ function liveItems() { return pcOnline() ? ((state && state.items) || []) : []; 
 
 function liveHazards() { return pcOnline() ? ((state && state.hazards) || []) : []; }
 
+// Monsters not awake yet (an Old Bird in its nest): the game only makes them a monster once they wake up.
+function liveDormant() { return pcOnline() ? ((state && state.dormant) || []) : []; }
+
 function noEnemiesText() { return pcOnline() ? "No living enemies right now" : "PC is offline: no enemies shown"; }
 
 // ---------- version lock ----------
@@ -1800,10 +1803,12 @@ function drawMap() {
   mapUi.box.className = "map-panels" + (maps.length > 1 ? " both" : "");
 
   var problem = null;
+  // The game makes the map a couple of seconds after the ship has landed. Until it's here, say so rather than
+  // keep showing the last moon's map. (mapReady comes from newer menus; older ones only have the seed to go by.)
   if (currentDev && !pcOnline()) { problem = "PC is offline."; }
-  else if (!g.inRound || g.inShipPhase || !g.landed) { problem = "Land on a moon to see the map."; }
-  else if (!mapData) { problem = "Waiting for the map from the game (it's made a few seconds after landing)."; }
-  else if (g.mapSeed !== undefined && mapData.seed !== g.mapSeed) { problem = "Waiting for this moon's map..."; }
+  else if (!g.inRound || g.inShipPhase) { problem = "Land on a moon to see the map."; }
+  else if (!g.landed) { problem = g.mapReady ? "The ship is taking off." : "Building the map... (the ship is landing)"; }
+  else if (g.mapReady === false || !mapData || (g.mapSeed !== undefined && mapData.seed !== g.mapSeed)) { problem = "Building the map..."; }
   curLevel = problem ? -1 : pickLevel(players);
   var showLevels = curLevel >= 0 && maps.indexOf("inside") >= 0;
   mapUi.levelBtn.style.display = showLevels ? "" : "none";
@@ -2002,6 +2007,20 @@ function drawMapPanel(panel, which, problem, both) {
       ctx.restore();
     }
   }
+  // Dormant monsters (an Old Bird in its nest): a faded hollow red circle, "(dormant)".
+  liveDormant().filter(function (d) { return d.p && !!d.i === inside && (!inside || onLevel(d.p)); }).forEach(function (d) {
+    var s = screen(d.p);
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#e5534b";
+    ctx.stroke();
+    label(s, (d.n || "Monster") + " (dormant)", "#f2a19c");
+    ctx.restore();
+    panel.items.push({ x: s.x, y: s.y, text: (d.n || "Monster") + " (dormant)" });
+  });
   // Monsters and players on another level: faded, with which level they're on.
   enemies.filter(function (e) { return e.pos && !!e.inside === inside; }).forEach(function (e) {
     var s = screen(e.pos);

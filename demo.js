@@ -183,6 +183,7 @@ if (/[?&]mine(&|$)/.test(location.search)) {
 }
 demo.state.game.mapSeed = 1234;
 demo.state.game.ship = [10, -20];
+demo.state.players[0].yaw = 135; demo.state.players[1].yaw = 270;
 demo.state.players[0].pos = [-60, -40, -200]; demo.state.players[0].item = "Shovel";
 demo.state.players[1].pos = [-10, -48, -200]; demo.state.players[1].item = "Flashlight";
 // The route the game sends for the way-out line (here: Friend is nearer a fire exit).

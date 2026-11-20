@@ -2057,7 +2057,25 @@ function drawMapPanel(panel, which, problem, both) {
       ctx.stroke();
       label(s, p.name + " (dead)" + note, "#aaaaaa");
     } else {
-      dot(s, p.local ? 7 : 6, p.local ? "#3cb371" : "#4a90d9");
+      var r = p.local ? 7 : 6;
+      var color = p.local ? "#3cb371" : "#4a90d9";
+      if (typeof p.yaw === "number") {
+        // Arrow just outside the dot, pointing where they face (0 = north, up on the map).
+        var a = p.yaw * Math.PI / 180;
+        var fx = Math.sin(a);
+        var fy = -Math.cos(a);
+        ctx.beginPath();
+        ctx.moveTo(s.x + fx * (r + 8), s.y + fy * (r + 8));
+        ctx.lineTo(s.x + fx * (r + 1) - fy * 5, s.y + fy * (r + 1) + fx * 5);
+        ctx.lineTo(s.x + fx * (r + 1) + fy * 5, s.y + fy * (r + 1) - fx * 5);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "#000";
+        ctx.stroke();
+      }
+      dot(s, r, color);
       label(s, p.name + note, p.local ? "#7be0a5" : "#9cc7f2");
     }
     ctx.restore();

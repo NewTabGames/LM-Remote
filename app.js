@@ -1408,7 +1408,7 @@ function drawTraps(ctx, panel, screen, inside, players, cssW, cssH, label) {
     ctx.restore();
     var name = (TRAP_NAMES[t.t] || "Trap") + (t.on ? "" : " (off)") + floorNote;
     panel.items.push({ x: s.x, y: s.y, text: name }); // hover / tap shows it
-    if (t.t === "turret" || mapZoom >= 2.2) { label(s, name, faded ? "rgba(255,138,165,0.6)" : "#ff8aa5", true); }
+    label(s, name, faded ? "rgba(255,138,165,0.6)" : "#ff8aa5", true);
   });
 }
 

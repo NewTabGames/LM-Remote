@@ -171,6 +171,16 @@ demo.map = {
     { x: -82, z: -62, inside: true, main: true }, { x: 95, z: 40, inside: true, main: false }
   ]
 };
+// index.html?demo&mine: a Mineshaft-like building, an elevator room high above the mine.
+if (/[?&]mine(&|$)/.test(location.search)) {
+  demo.map.insideLevels = [
+    { top: -148, bottom: -152, grid: grid(-100, -80, 1.5, 140, 110, function (rect) { rect(8, 8, 30, 20, 3); }) },
+    { top: -195, bottom: -210, grid: demo.map.inside }
+  ];
+  demo.map.elevator = { top: [-70, -60, -150], bottom: [-70, -60, -205] };
+  demo.map.doors[2].y = -150;
+  demo.map.doors[3].y = -200;
+}
 demo.state.game.mapSeed = 1234;
 demo.state.game.ship = [10, -20];
 demo.state.players[0].pos = [-60, -40, -200]; demo.state.players[0].item = "Shovel";
@@ -182,6 +192,12 @@ demo.state.enemies[0].pos = [-55, -28];
 demo.state.enemies[1].pos = [20, 50];
 demo.state.enemies[2].pos = [-120, 60];
 demo.state.enemies.push({ id: 104, name: "Roaming Locusts", type: "DocileLocustBeesAI", dead: false, inside: false, distance: 67, pos: [-90, 30] });
+// Traps: a turret and spike trap near you, a mine in the corridor, one switched off, one a floor up.
+demo.state.hazards = [
+  { t: "turret", on: true, i: true, p: [-40, -55, -200] }, { t: "mine", on: true, i: true, p: [0, -48, -200] },
+  { t: "mine", on: false, i: true, p: [36, -30, -200] }, { t: "spikes", on: true, i: true, p: [-75, -45, -200] },
+  { t: "turret", on: true, i: true, p: [40, 0, -192] }
+];
 demo.state.items = [
   { n: "Large axle", v: 52, i: true, p: [-70, -35, -200] }, { n: "Gold bar", v: 160, i: true, p: [40, 10, -200] },
   { n: "Brass bell", v: 63, i: true, p: [-20, -60, -193] }, { n: "Whoopie cushion", v: 9, i: false, p: [-30, 25] },

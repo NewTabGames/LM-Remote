@@ -406,6 +406,8 @@ function liveGame() { return pcOnline() ? ((state && state.game) || {}) : {}; }
 
 function liveItems() { return pcOnline() ? ((state && state.items) || []) : []; }
 
+function liveHazards() { return pcOnline() ? ((state && state.hazards) || []) : []; }
+
 function noEnemiesText() { return pcOnline() ? "No living enemies right now" : "PC is offline: no enemies shown"; }
 
 // ---------- version lock ----------
@@ -1230,6 +1232,7 @@ var mapMode = loadPref("mapMode") || "auto"; // auto = wherever you are; "outsid
 var mapZoom = 1;
 var mapFollow = null; // "Follow" keeps this player (by clientId) in the middle; null = you
 var mapItems = loadPref("mapItems") !== "0"; // show items lying around (scrap etc.)
+var mapTraps = loadPref("mapTraps") !== "0"; // turrets, landmines and spike traps
 var mapRoute = loadPref("mapRoute") !== "0"; // line along the floor to the nearest way out (or way in)
 
 // The game only sends positions (players, monsters, items) while someone has the Map tab open: this tells it.
@@ -1249,6 +1252,7 @@ resetMapPan();
 function setMapData(data) {
   mapData = data;
   mapImages = {};
+  mapLevel = "auto";
   resetMapPan();
   drawMap();
 }
@@ -1272,9 +1276,13 @@ var FLOOR_SHADES = [null, [52, 58, 68], [66, 74, 86], [82, 92, 106], [100, 111, 
 var WALL_SHADE = [176, 186, 200];
 
 // Turns one grid into a small picture (one pixel per cell); walls are the floor cells next to empty ones.
-function floorImage(which) {
-  if (mapImages[which]) { return mapImages[which]; }
-  var g = mapData && mapData[which];
+function floorImage(which, level) {
+  if (level === undefined) { level = which === "inside" ? curLevel : -1; }
+  var levels = which === "inside" ? insideLevelsList() : null;
+  if (!levels) { level = -1; }
+  var key = level >= 0 ? "inside:" + level : which;
+  if (mapImages[key]) { return mapImages[key]; }
+  var g = level >= 0 ? levels[level].grid : mapData && mapData[which];
   if (!g || !g.data || !g.w || !g.h) { return null; }
   var cells = decodeGrid(g);
   var w = g.w;
@@ -1299,13 +1307,116 @@ function floorImage(which) {
     }
   }
   ctx.putImageData(img, 0, 0);
-  mapImages[which] = { canvas: canvas, grid: g, cells: cells };
-  return mapImages[which];
+  mapImages[key] = { canvas: canvas, grid: g, cells: cells };
+  return mapImages[key];
+}
+
+// ---------- inside levels ----------
+// A building whose inside is split in levels with a drop and no stairs between them (the Mineshaft: the elevator
+// room sits high above the mine) gets one map per level, top first. The map shows the level the player it's on is
+// on; "Level" picks one by hand.
+var mapLevel = "auto"; // "auto", or a level number
+var curLevel = -1; // the level being drawn (-1: the building has just one)
+
+function insideLevelsList() { return mapData && mapData.insideLevels && mapData.insideLevels.length > 1 ? mapData.insideLevels : null; }
+
+function levelName(k) {
+  var list = insideLevelsList();
+  if (!list || k < 0) { return ""; }
+  return list.length === 2 ? (k === 0 ? "Upper level" : "Lower level") : "Level " + (k + 1);
+}
+
+// The level a height is on (the nearest one when it's between them).
+function levelOf(y) {
+  var list = insideLevelsList();
+  if (!list) { return -1; }
+  var best = 0;
+  var bestGap = Infinity;
+  for (var k = 0; k < list.length; k++) {
+    var gap = y > list[k].top ? y - list[k].top : (y < list[k].bottom ? list[k].bottom - y : 0);
+    if (gap < bestGap) { bestGap = gap; best = k; }
+  }
+  return best;
+}
+
+function pickLevel(players) {
+  var list = insideLevelsList();
+  if (!list) { return -1; }
+  if (mapLevel !== "auto") { return Math.min(mapLevel, list.length - 1); }
+  var ref = mapMode === "auto" ? followTarget(players) : players.filter(function (q) { return q.local; })[0];
+  if (ref && ref.inside && ref.pos && ref.pos.length > 2) { return levelOf(ref.pos[2]); }
+  // Nobody to go by: the level with the main entrance, where everyone comes in.
+  var main = (mapData.doors || []).filter(function (d) { return d.inside && d.main && d.y !== undefined; })[0];
+  return main ? levelOf(main.y) : 0;
+}
+
+// Whether a position ([x, z, y]) is on the level being drawn (always, for a one-level building or no height).
+function onLevel(pos) {
+  if (curLevel < 0 || !pos || pos.length < 3 || pos[2] === undefined || pos[2] === null) { return true; }
+  return levelOf(pos[2]) === curLevel;
+}
+
+function levelNote(pos) {
+  if (curLevel < 0 || !pos || pos.length < 3) { return ""; }
+  return levelOf(pos[2]) < curLevel ? " (upper level)" : " (lower level)";
+}
+
+function cycleLevel() {
+  var list = insideLevelsList();
+  if (!list) { return; }
+  mapLevel = mapLevel === "auto" ? 0 : (mapLevel + 1 < list.length ? mapLevel + 1 : "auto");
+  drawMap();
+}
+
+// ---------- traps ----------
+var TRAP_COLOR = "#ff2e63";
+var TRAP_NAMES = { turret: "Turret", mine: "Landmine", spikes: "Spike trap" };
+
+// Turrets (triangle), landmines (circle) and spike traps (cross). Switched off by a terminal: faded, "(off)". On
+// another floor than the player the map is on: faded, "upstairs"/"downstairs", like items. Mines and spike traps
+// only get a name once zoomed in, since there can be a lot of them.
+function drawTraps(ctx, panel, screen, inside, players, cssW, cssH, label) {
+  var ref = inside ? routePlayer(players) : null;
+  var refY = ref && ref.inside && ref.pos && ref.pos.length > 2 ? ref.pos[2] : null;
+  liveHazards().forEach(function (t) {
+    if (!t.p || !!t.i !== inside || (inside && !onLevel(t.p))) { return; }
+    var s = screen(t.p);
+    if (s.x < -20 || s.y < -20 || s.x > cssW + 20 || s.y > cssH + 20) { return; }
+    var dy = refY !== null && t.p.length > 2 ? t.p[2] - refY : 0;
+    var floorNote = dy > 3 ? " (upstairs)" : (dy < -3 ? " (downstairs)" : "");
+    var faded = !t.on || !!floorNote;
+    ctx.save();
+    ctx.globalAlpha = faded ? 0.45 : 1;
+    ctx.beginPath();
+    if (t.t === "turret") {
+      ctx.moveTo(s.x, s.y - 6); ctx.lineTo(s.x + 6, s.y + 5); ctx.lineTo(s.x - 6, s.y + 5); ctx.closePath();
+    } else if (t.t === "mine") {
+      ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
+    } else {
+      ctx.moveTo(s.x - 5, s.y - 5); ctx.lineTo(s.x + 5, s.y + 5); ctx.moveTo(s.x + 5, s.y - 5); ctx.lineTo(s.x - 5, s.y + 5);
+    }
+    if (t.t === "spikes") {
+      ctx.lineWidth = 4; ctx.strokeStyle = "#000"; ctx.stroke();
+      ctx.lineWidth = 2; ctx.strokeStyle = TRAP_COLOR; ctx.stroke();
+    } else {
+      ctx.fillStyle = TRAP_COLOR; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = "#000"; ctx.stroke();
+    }
+    ctx.restore();
+    var name = (TRAP_NAMES[t.t] || "Trap") + (t.on ? "" : " (off)") + floorNote;
+    panel.items.push({ x: s.x, y: s.y, text: name }); // hover / tap shows it
+    if (t.t === "turret" || mapZoom >= 2.2) { label(s, name, faded ? "rgba(255,138,165,0.6)" : "#ff8aa5", true); }
+  });
 }
 
 // ---------- way out ----------
 var ROUTE_MAIN = "#5ad1ff"; // to the main entrance
 var ROUTE_FIRE = "#ff5a5a"; // to a fire exit
+var ROUTE_LIFT = "#ffd84a"; // to the Mineshaft elevator (the way up to the main entrance)
+
+function routeName(route) { return route.elevator ? "Elevator" : doorName(route.main); }
+
+function routeColor(route) { return route.elevator ? ROUTE_LIFT : (route.main ? ROUTE_MAIN : ROUTE_FIRE); }
 
 // How far each floor cell is from the nearest wall (in cells, counted up to 4), worked out once per map. The
 // fallback way-out line keeps off the walls a little, the way you'd walk down the middle of a corridor.
@@ -1385,19 +1496,26 @@ MinHeap.prototype.size = function () { return this.keys.length; };
 // The fallback way out from pos when the game doesn't send a route (older menu): the shortest walk over the
 // flat floor picture to the nearest door on that side, in real distances (a diagonal step is longer than a straight
 // one), keeping a little off the walls, then pulled straight wherever a straight line stays on the floor. The
-// building's floors are flattened onto one picture, so a step may only go to the next height band (that keeps it on
-// stairs rather than jumping between floors stacked on top of each other).
+// building's floors are flattened onto one picture, so inside a step may only go to the next height band (that
+// keeps it on stairs rather than jumping between floors stacked on top of each other). Outside there are no stacked
+// floors, and the few coarse height bands of a whole moon made ledges look like walls, so heights don't matter there.
 // Returns { main, meters, points: [[x, z], ...] } or null.
 function pathToDoor(which, pos) {
-  var floor = floorImage(which);
+  var level = which === "inside" && insideLevelsList() && pos && pos.length > 2 ? levelOf(pos[2]) : -1;
+  var floor = floorImage(which, level);
   if (!floor || !pos || !mapData) { return null; }
   var g = floor.grid;
   var cells = floor.cells;
   var w = g.w;
   var h = g.h;
   var inside = which === "inside";
-  var doors = (mapData.doors || []).filter(function (d) { return !!d.inside === inside; });
-  if (!doors.length) { return null; }
+  var doors = (mapData.doors || []).filter(function (d) { return !!d.inside === inside && (level < 0 || d.y === undefined || levelOf(d.y) === level); });
+  // A level without the main entrance (the mine) can also be left by the elevator.
+  var lift = null;
+  if (level >= 0 && mapData.elevator && !doors.some(function (d) { return d.main; })) {
+    [mapData.elevator.top, mapData.elevator.bottom].forEach(function (end) { if (end && levelOf(end[2]) === level) { lift = end; } });
+  }
+  if (!doors.length && !lift) { return null; }
   function nearestFloor(p, radius) {
     var cx = Math.floor((p[0] - g.x0) / g.cell);
     var cz = Math.floor((p[1] - g.z0) / g.cell);
@@ -1419,6 +1537,7 @@ function pathToDoor(which, pos) {
   var clear = clearanceOf(floor);
   var goals = {};
   doors.forEach(function (d) { var i = nearestFloor([d.x, d.z], 5); if (i >= 0) { goals[i] = d; } });
+  if (lift) { var li = nearestFloor(lift, 5); if (li >= 0) { goals[li] = { elevator: true }; } }
   var WALL_COST = [0, 1.6, 0.6, 0.15]; // extra cost for a cell 1, 2 or 3 cells from a wall
   var cost = new Float32Array(w * h).fill(Infinity);
   var prev = new Int32Array(w * h).fill(-1);
@@ -1440,7 +1559,7 @@ function pathToDoor(which, pos) {
         var nz = z + dz;
         if (nx < 0 || nz < 0 || nx >= w || nz >= h) { continue; }
         var n = nz * w + nx;
-        if (!cells[n] || Math.abs(cells[n] - cells[c]) > 1) { continue; }
+        if (!cells[n] || (inside && Math.abs(cells[n] - cells[c]) > 1)) { continue; } // height steps: inside only
         if (dx && dz && (!cells[z * w + nx] || !cells[nz * w + x])) { continue; } // no cutting wall corners
         var next = base + (dx && dz ? 1.414 : 1) + (WALL_COST[clear[n]] || 0);
         if (next < cost[n]) { cost[n] = next; prev[n] = c; heap.push(next, n); }
@@ -1461,7 +1580,7 @@ function pathToDoor(which, pos) {
       for (var s = 1; s < steps; s++) {
         var t = s / steps;
         var i = Math.round(az + (bz - az) * t) * w + Math.round(ax + (bx - ax) * t);
-        if (!cells[i] || clear[i] < need || Math.abs(cells[i] - cells[last]) > 1) { return false; }
+        if (!cells[i] || clear[i] < need || (inside && Math.abs(cells[i] - cells[last]) > 1)) { return false; }
         last = i;
       }
       return true;
@@ -1479,7 +1598,7 @@ function pathToDoor(which, pos) {
     for (var k = 1; k < points.length; k++) {
       meters += Math.sqrt(Math.pow(points[k][0] - points[k - 1][0], 2) + Math.pow(points[k][1] - points[k - 1][1], 2));
     }
-    result = { main: !!goals[found].main, meters: meters, points: points };
+    result = { main: !!goals[found].main, elevator: !!goals[found].elevator, meters: meters, points: points };
   }
   floor.route = { start: start, result: result };
   return result;
@@ -1489,7 +1608,7 @@ function pathToDoor(which, pos) {
 // floors), otherwise the website's guess from the flat floor picture.
 function routeFor(p, which) {
   var r = p.route;
-  if (r && r.pts && r.pts.length > 1) { return { main: !!r.main, meters: r.m || 0, points: r.pts }; }
+  if (r && r.pts && r.pts.length > 1) { return { main: r.to ? r.to === "main" : !!r.main, elevator: r.to === "elevator", meters: r.m || 0, points: r.pts }; }
   return pathToDoor(which, p.pos);
 }
 
@@ -1558,20 +1677,25 @@ function buildMap(content) {
     class: "btn small", type: "button",
     onclick: function () { mapItems = !mapItems; savePref("mapItems", mapItems ? "1" : "0"); drawMap(); }
   }));
+  var trapsBtn = bar.appendChild(el("button", {
+    class: "btn small", type: "button",
+    onclick: function () { mapTraps = !mapTraps; savePref("mapTraps", mapTraps ? "1" : "0"); drawMap(); }
+  }));
   var routeBtn = bar.appendChild(el("button", {
     class: "btn small", type: "button",
     onclick: function () { mapRoute = !mapRoute; savePref("mapRoute", mapRoute ? "1" : "0"); drawMap(); }
   }));
+  var levelBtn = bar.appendChild(el("button", { class: "btn small", type: "button", onclick: function () { cycleLevel(); } }));
   var info = bar.appendChild(el("span", { class: "map-info" }));
   var box = el("div", { class: "map-panels" });
   content.appendChild(bar);
   content.appendChild(box);
   content.appendChild(el("div", { class: "map-legend" }, [
     legendItem("#3cb371", "You"), legendItem("#4a90d9", "Players"), legendItem("#8a8a8a", "Dead"),
-    legendItem("#e5534b", "Monsters"), legendItem("#e0b341", "Ship"), legendItem("#ff8c1a", "Doors"), legendItem("#c792ea", "Items"),
-    legendItem(ROUTE_MAIN, "Way to main entrance"), legendItem(ROUTE_FIRE, "Way to fire exit")
+    legendItem("#e5534b", "Monsters"), legendItem("#e0b341", "Ship"), legendItem("#ff8c1a", "Doors"), legendItem("#c792ea", "Items"), legendItem(TRAP_COLOR, "Traps"),
+    legendItem(ROUTE_MAIN, "Way to main entrance"), legendItem(ROUTE_FIRE, "Way to fire exit"), legendItem(ROUTE_LIFT, "Way to elevator")
   ]));
-  mapUi = { box: box, panels: [], info: info, buttons: buttons, itemsBtn: itemsBtn, routeBtn: routeBtn };
+  mapUi = { box: box, panels: [], info: info, buttons: buttons, itemsBtn: itemsBtn, trapsBtn: trapsBtn, routeBtn: routeBtn, levelBtn: levelBtn };
   drawMap();
 }
 
@@ -1663,6 +1787,8 @@ function drawMap() {
   mapUi.buttons.auto.title = mapMode === "auto" ? "Click again to follow the next player" : "";
   mapUi.itemsBtn.textContent = mapItems ? "Items: on" : "Items: off";
   mapUi.itemsBtn.className = "btn small" + (mapItems ? " primary" : "");
+  mapUi.trapsBtn.textContent = mapTraps ? "Traps: on" : "Traps: off";
+  mapUi.trapsBtn.className = "btn small" + (mapTraps ? " primary" : "");
   mapUi.routeBtn.textContent = mapRoute ? "Way out: on" : "Way out: off";
   mapUi.routeBtn.className = "btn small" + (mapRoute ? " primary" : "");
 
@@ -1678,13 +1804,18 @@ function drawMap() {
   else if (!g.inRound || g.inShipPhase || !g.landed) { problem = "Land on a moon to see the map."; }
   else if (!mapData) { problem = "Waiting for the map from the game (it's made a few seconds after landing)."; }
   else if (g.mapSeed !== undefined && mapData.seed !== g.mapSeed) { problem = "Waiting for this moon's map..."; }
+  curLevel = problem ? -1 : pickLevel(players);
+  var showLevels = curLevel >= 0 && maps.indexOf("inside") >= 0;
+  mapUi.levelBtn.style.display = showLevels ? "" : "none";
+  mapUi.levelBtn.textContent = "Level: " + (mapLevel === "auto" ? "auto (" + levelName(curLevel) + ")" : levelName(curLevel));
+  mapUi.levelBtn.className = "btn small" + (mapLevel === "auto" ? "" : " primary");
   var routeText = "";
   var walker = !problem && mapRoute ? routePlayer(players) : null;
   if (walker) {
     var route = routeFor(walker, walker.inside ? "inside" : "outside");
-    routeText = route ? " | " + doorName(route.main) + " " + Math.round(route.meters) + " m" : "";
+    routeText = route ? " | " + routeName(route) + " " + Math.round(route.meters) + " m" : "";
   }
-  mapUi.info.textContent = problem ? "" : mapData.moon + (maps.length > 1 ? " | Outside and inside" : " | " + (maps[0] === "inside" ? "Inside the facility" : "Outside") + (mapMode === "auto" ? " (following " + followName + ")" : "")) + routeText;
+  mapUi.info.textContent = problem ? "" : mapData.moon + (maps.length > 1 ? " | Outside and inside" : " | " + (maps[0] === "inside" ? "Inside the facility" + (showLevels ? ", " + levelName(curLevel).toLowerCase() : "") : "Outside") + (mapMode === "auto" ? " (following " + followName + ")" : "")) + routeText;
 
   maps.forEach(function (which, i) {
     var panel = mapUi.panels[i];
@@ -1758,12 +1889,25 @@ function drawMapPanel(panel, which, problem, both) {
     ctx.stroke();
   }
   var inside = which === "inside";
-  (mapData.doors || []).filter(function (d) { return !!d.inside === inside; }).forEach(function (d) {
+  var hereDoors = (mapData.doors || []).filter(function (d) { return !!d.inside === inside && (!inside || onLevel([d.x, d.z, d.y])); });
+  hereDoors.forEach(function (d) {
     var s = screen([d.x, d.z]);
     ctx.fillStyle = "#ff8c1a";
     ctx.fillRect(s.x - 4, s.y - 4, 8, 8);
     label(s, d.main ? "Main entrance" : "Fire exit", "#ffb066", true);
   });
+  if (inside && mapData.elevator) {
+    [mapData.elevator.top, mapData.elevator.bottom].forEach(function (end) {
+      if (!end || !onLevel(end)) { return; }
+      var s = screen(end);
+      ctx.fillStyle = ROUTE_LIFT;
+      ctx.fillRect(s.x - 5, s.y - 5, 10, 10);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "#000";
+      ctx.strokeRect(s.x - 5, s.y - 5, 10, 10);
+      label(s, "Elevator", "#ffe78a", true);
+    });
+  }
   if (!inside && g.ship) {
     var ship = screen(g.ship);
     ctx.fillStyle = "#e0b341";
@@ -1783,7 +1927,7 @@ function drawMapPanel(panel, which, problem, both) {
       taken.push({ x: s.x - w / 2, y: s.y - 22, w: w, h: 16 });
       taken.push({ x: s.x - 8, y: s.y - 8, w: 16, h: 16 });
     });
-    (mapData.doors || []).filter(function (d) { return !!d.inside === inside; }).forEach(function (d) {
+    hereDoors.forEach(function (d) {
       var s = screen([d.x, d.z]);
       var w = ctx.measureText(d.main ? "Main entrance" : "Fire exit").width + 6;
       taken.push({ x: s.x - w / 2, y: s.y - 5, w: w, h: 27 });
@@ -1804,7 +1948,7 @@ function drawMapPanel(panel, which, problem, both) {
     // are drawn hollow and faded, and say "upstairs" / "downstairs".
     var ref = inside ? routePlayer(players) : null;
     var refY = ref && ref.inside && ref.pos && ref.pos.length > 2 ? ref.pos[2] : null;
-    var shown = liveItems().filter(function (it) { return it.p && !!it.i === inside; }).map(function (it) {
+    var shown = liveItems().filter(function (it) { return it.p && !!it.i === inside && (!inside || onLevel(it.p)); }).map(function (it) {
       var dy = refY !== null && it.p.length > 2 ? it.p[2] - refY : 0;
       return { it: it, s: screen(it.p), floor: dy > 3 ? " (upstairs)" : (dy < -3 ? " (downstairs)" : "") };
     }).filter(function (o) { return o.s.x > -60 && o.s.x < cssW + 60 && o.s.y > -30 && o.s.y < cssH + 30; });
@@ -1837,9 +1981,10 @@ function drawMapPanel(panel, which, problem, both) {
       }
     });
   }
+  if (mapTraps) { drawTraps(ctx, panel, screen, inside, players, cssW, cssH, label); }
   // The way out (inside) or in (outside): a dashed line along the floor to the nearest door on this side.
   var walker = mapRoute ? routePlayer(players) : null;
-  if (walker && !!walker.inside === inside) {
+  if (walker && !!walker.inside === inside && (!inside || onLevel(walker.pos))) {
     var route = routeFor(walker, which);
     if (route && route.points.length > 1) {
       ctx.save();
@@ -1852,20 +1997,29 @@ function drawMapPanel(panel, which, problem, both) {
       ctx.stroke();
       ctx.setLineDash([7, 5]);
       ctx.lineWidth = 2.5;
-      ctx.strokeStyle = route.main ? ROUTE_MAIN : ROUTE_FIRE;
+      ctx.strokeStyle = routeColor(route);
       ctx.stroke();
       ctx.restore();
     }
   }
+  // Monsters and players on another level: faded, with which level they're on.
   enemies.filter(function (e) { return e.pos && !!e.inside === inside; }).forEach(function (e) {
     var s = screen(e.pos);
+    var away = inside && !onLevel(e.pos);
+    ctx.save();
+    ctx.globalAlpha = away ? 0.4 : 1;
     dot(s, 5, "#e5534b");
-    label(s, e.name, "#f2a19c");
+    label(s, e.name + (away ? levelNote(e.pos) : ""), "#f2a19c");
+    ctx.restore();
   });
   // Players last so they sit on top; you on top of everyone.
   panel.players = [];
   players.filter(function (p) { return p.pos && !!p.inside === inside; }).sort(function (a, b) { return (a.local ? 1 : 0) - (b.local ? 1 : 0); }).forEach(function (p) {
     var s = screen(p.pos);
+    var away = inside && !onLevel(p.pos);
+    var note = away ? levelNote(p.pos) : "";
+    ctx.save();
+    ctx.globalAlpha = away ? 0.4 : 1;
     panel.players.push({ x: s.x, y: s.y, player: p });
     if (mapMode === "auto" && p === target && !p.local) {
       // Ring around the player you're following.
@@ -1882,11 +2036,12 @@ function drawMapPanel(panel, which, problem, both) {
       ctx.moveTo(s.x - 5, s.y - 5); ctx.lineTo(s.x + 5, s.y + 5);
       ctx.moveTo(s.x + 5, s.y - 5); ctx.lineTo(s.x - 5, s.y + 5);
       ctx.stroke();
-      label(s, p.name + " (dead)", "#aaaaaa");
+      label(s, p.name + " (dead)" + note, "#aaaaaa");
     } else {
       dot(s, p.local ? 7 : 6, p.local ? "#3cb371" : "#4a90d9");
-      label(s, p.name, p.local ? "#7be0a5" : "#9cc7f2");
+      label(s, p.name + note, p.local ? "#7be0a5" : "#9cc7f2");
     }
+    ctx.restore();
   });
 }
 

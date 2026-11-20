@@ -175,6 +175,8 @@ demo.state.game.mapSeed = 1234;
 demo.state.game.ship = [10, -20];
 demo.state.players[0].pos = [-60, -40, -200]; demo.state.players[0].item = "Shovel";
 demo.state.players[1].pos = [-10, -48, -200]; demo.state.players[1].item = "Flashlight";
+// The route the game sends for the way-out line (here: Friend is nearer a fire exit).
+demo.state.players[1].route = { main: false, m: 152, pts: [[-10, -48, -200], [28, -48, -200], [30, -40, -200], [30, 5, -200], [60, 30, -200], [95, 40, -200]] };
 demo.state.players[2].pos = [30, -10];
 demo.state.enemies[0].pos = [-55, -28];
 demo.state.enemies[1].pos = [20, 50];

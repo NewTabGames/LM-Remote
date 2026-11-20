@@ -1303,10 +1303,91 @@ function floorImage(which) {
   return mapImages[which];
 }
 
-// The way out from pos: the shortest walk over the floor to the nearest door on that side (inside: main entrance
-// or a fire exit out of the building; outside: the way in). Floors are flattened onto one picture, so a step may
-// only go to the next height band (that keeps it on stairs instead of jumping between floors stacked on top of
-// each other). Returns { points: [[x, z], ...], door, meters } or null.
+// ---------- way out ----------
+var ROUTE_MAIN = "#5ad1ff"; // to the main entrance
+var ROUTE_FIRE = "#ff5a5a"; // to a fire exit
+
+// How far each floor cell is from the nearest wall (in cells, counted up to 4), worked out once per map. The
+// fallback way-out line keeps off the walls a little, the way you'd walk down the middle of a corridor.
+function clearanceOf(floor) {
+  if (floor.clearance) { return floor.clearance; }
+  var g = floor.grid;
+  var cells = floor.cells;
+  var w = g.w;
+  var h = g.h;
+  var n = w * h;
+  var clear = new Uint8Array(n).fill(255);
+  var queue = new Int32Array(n);
+  var head = 0;
+  var tail = 0;
+  for (var i = 0; i < n; i++) {
+    var x = i % w;
+    var z = (i - x) / w;
+    if (!cells[i]) { clear[i] = 0; queue[tail++] = i; }
+    else if (x === 0 || z === 0 || x === w - 1 || z === h - 1) { clear[i] = 1; queue[tail++] = i; }
+  }
+  while (head < tail) {
+    var c = queue[head++];
+    var v = clear[c];
+    if (v >= 4) { continue; }
+    var cx = c % w;
+    var cz = (c - cx) / w;
+    var near = [cx > 0 ? c - 1 : -1, cx < w - 1 ? c + 1 : -1, cz > 0 ? c - w : -1, cz < h - 1 ? c + w : -1];
+    for (var k = 0; k < 4; k++) {
+      var m = near[k];
+      if (m >= 0 && clear[m] > v + 1) { clear[m] = v + 1; queue[tail++] = m; }
+    }
+  }
+  floor.clearance = clear;
+  return clear;
+}
+
+// Smallest-first queue for the route search.
+function MinHeap() { this.keys = []; this.vals = []; }
+MinHeap.prototype.push = function (key, val) {
+  var keys = this.keys;
+  var vals = this.vals;
+  var i = keys.length;
+  keys.push(key);
+  vals.push(val);
+  while (i > 0) {
+    var p = (i - 1) >> 1;
+    if (keys[p] <= key) { break; }
+    keys[i] = keys[p]; vals[i] = vals[p];
+    i = p;
+  }
+  keys[i] = key; vals[i] = val;
+};
+MinHeap.prototype.pop = function () {
+  var keys = this.keys;
+  var vals = this.vals;
+  var top = vals[0];
+  var lastKey = keys.pop();
+  var lastVal = vals.pop();
+  var n = keys.length;
+  if (n) {
+    var i = 0;
+    for (;;) {
+      var l = 2 * i + 1;
+      if (l >= n) { break; }
+      var r = l + 1;
+      var s = r < n && keys[r] < keys[l] ? r : l;
+      if (keys[s] >= lastKey) { break; }
+      keys[i] = keys[s]; vals[i] = vals[s];
+      i = s;
+    }
+    keys[i] = lastKey; vals[i] = lastVal;
+  }
+  return top;
+};
+MinHeap.prototype.size = function () { return this.keys.length; };
+
+// The fallback way out from pos when the game doesn't send a route (older menu): the shortest walk over the
+// flat floor picture to the nearest door on that side, in real distances (a diagonal step is longer than a straight
+// one), keeping a little off the walls, then pulled straight wherever a straight line stays on the floor. The
+// building's floors are flattened onto one picture, so a step may only go to the next height band (that keeps it on
+// stairs rather than jumping between floors stacked on top of each other).
+// Returns { main, meters, points: [[x, z], ...] } or null.
 function pathToDoor(which, pos) {
   var floor = floorImage(which);
   if (!floor || !pos || !mapData) { return null; }
@@ -1335,21 +1416,23 @@ function pathToDoor(which, pos) {
   var start = nearestFloor(pos, 4);
   if (start < 0) { return null; }
   if (floor.route && floor.route.start === start) { return floor.route.result; } // same spot as last time
+  var clear = clearanceOf(floor);
   var goals = {};
   doors.forEach(function (d) { var i = nearestFloor([d.x, d.z], 5); if (i >= 0) { goals[i] = d; } });
-  // Breadth-first over 8 neighbours; diagonals only where both side cells are floor (no cutting wall corners).
+  var WALL_COST = [0, 1.6, 0.6, 0.15]; // extra cost for a cell 1, 2 or 3 cells from a wall
+  var cost = new Float32Array(w * h).fill(Infinity);
   var prev = new Int32Array(w * h).fill(-1);
-  var queue = new Int32Array(w * h);
-  var head = 0;
-  var tail = 0;
+  var heap = new MinHeap();
+  cost[start] = 0;
   prev[start] = start;
-  queue[tail++] = start;
+  heap.push(0, start);
   var found = -1;
-  while (head < tail) {
-    var c = queue[head++];
+  while (heap.size()) {
+    var c = heap.pop();
     if (goals[c]) { found = c; break; }
     var x = c % w;
     var z = (c - x) / w;
+    var base = cost[c];
     for (var dz = -1; dz <= 1; dz++) {
       for (var dx = -1; dx <= 1; dx++) {
         if (!dx && !dz) { continue; }
@@ -1357,10 +1440,10 @@ function pathToDoor(which, pos) {
         var nz = z + dz;
         if (nx < 0 || nz < 0 || nx >= w || nz >= h) { continue; }
         var n = nz * w + nx;
-        if (prev[n] !== -1 || !cells[n] || Math.abs(cells[n] - cells[c]) > 1) { continue; }
-        if (dx && dz && (!cells[z * w + nx] || !cells[nz * w + x])) { continue; }
-        prev[n] = c;
-        queue[tail++] = n;
+        if (!cells[n] || Math.abs(cells[n] - cells[c]) > 1) { continue; }
+        if (dx && dz && (!cells[z * w + nx] || !cells[nz * w + x])) { continue; } // no cutting wall corners
+        var next = base + (dx && dz ? 1.414 : 1) + (WALL_COST[clear[n]] || 0);
+        if (next < cost[n]) { cost[n] = next; prev[n] = c; heap.push(next, n); }
       }
     }
   }
@@ -1369,26 +1452,45 @@ function pathToDoor(which, pos) {
     var chain = [];
     for (var at = found; ; at = prev[at]) { chain.push(at); if (at === start) { break; } }
     chain.reverse();
-    var meters = 0;
-    var points = [];
-    var lastDir = null;
-    for (var k = 0; k < chain.length; k++) {
-      var cx = chain[k] % w;
-      var cz = (chain[k] - cx) / w;
-      if (k > 0) {
-        var px = chain[k - 1] % w;
-        var pz = (chain[k - 1] - px) / w;
-        meters += (px !== cx && pz !== cz ? 1.414 : 1) * g.cell;
-        var dir = (cx - px) + "," + (cz - pz);
-        if (dir === lastDir && k < chain.length - 1) { points.pop(); } // only keep the corners
-        lastDir = dir;
+    // Straight line from cell a to cell b stays on the floor (no height jumps) and no closer to a wall than its ends.
+    var visible = function (a, b) {
+      var ax = a % w, az = (a - ax) / w, bx = b % w, bz = (b - bx) / w;
+      var steps = Math.max(Math.abs(bx - ax), Math.abs(bz - az)) * 2;
+      var need = Math.min(2, clear[a], clear[b]);
+      var last = a;
+      for (var s = 1; s < steps; s++) {
+        var t = s / steps;
+        var i = Math.round(az + (bz - az) * t) * w + Math.round(ax + (bx - ax) * t);
+        if (!cells[i] || clear[i] < need || Math.abs(cells[i] - cells[last]) > 1) { return false; }
+        last = i;
       }
-      points.push([g.x0 + (cx + 0.5) * g.cell, g.z0 + (cz + 0.5) * g.cell]);
+      return true;
+    };
+    var kept = [chain[0]];
+    var from = 0;
+    while (from < chain.length - 1) {
+      var to = from + 1;
+      while (to + 1 < chain.length && to - from < 80 && visible(chain[from], chain[to + 1])) { to++; }
+      kept.push(chain[to]);
+      from = to;
     }
-    result = { points: points, door: goals[found], meters: meters };
+    var points = kept.map(function (i) { var cx = i % w; var cz = (i - cx) / w; return [g.x0 + (cx + 0.5) * g.cell, g.z0 + (cz + 0.5) * g.cell]; });
+    var meters = 0;
+    for (var k = 1; k < points.length; k++) {
+      meters += Math.sqrt(Math.pow(points[k][0] - points[k - 1][0], 2) + Math.pow(points[k][1] - points[k - 1][1], 2));
+    }
+    result = { main: !!goals[found].main, meters: meters, points: points };
   }
   floor.route = { start: start, result: result };
   return result;
+}
+
+// The way out for this player on this map: the game's own route when the menu sends one (it knows the stairs and
+// floors), otherwise the website's guess from the flat floor picture.
+function routeFor(p, which) {
+  var r = p.route;
+  if (r && r.pts && r.pts.length > 1) { return { main: !!r.main, meters: r.m || 0, points: r.pts }; }
+  return pathToDoor(which, p.pos);
 }
 
 // Who the way-out line is drawn for: whoever "Follow" is on, or you on the other views. Not for the dead.
@@ -1397,7 +1499,7 @@ function routePlayer(players) {
   return p && p.pos && !p.dead ? p : null;
 }
 
-function doorName(d) { return d.main ? "Main entrance" : "Fire exit"; }
+function doorName(main) { return main ? "Main entrance" : "Fire exit"; }
 
 function legendItem(color, text) {
   return el("span", {}, [el("i", { style: "background:" + color }), text]);
@@ -1467,7 +1569,7 @@ function buildMap(content) {
   content.appendChild(el("div", { class: "map-legend" }, [
     legendItem("#3cb371", "You"), legendItem("#4a90d9", "Players"), legendItem("#8a8a8a", "Dead"),
     legendItem("#e5534b", "Monsters"), legendItem("#e0b341", "Ship"), legendItem("#ff8c1a", "Doors"), legendItem("#c792ea", "Items"),
-    legendItem("#5ad1ff", "Way out / in")
+    legendItem(ROUTE_MAIN, "Way to main entrance"), legendItem(ROUTE_FIRE, "Way to fire exit")
   ]));
   mapUi = { box: box, panels: [], info: info, buttons: buttons, itemsBtn: itemsBtn, routeBtn: routeBtn };
   drawMap();
@@ -1579,8 +1681,8 @@ function drawMap() {
   var routeText = "";
   var walker = !problem && mapRoute ? routePlayer(players) : null;
   if (walker) {
-    var route = pathToDoor(walker.inside ? "inside" : "outside", walker.pos);
-    routeText = route ? " | " + doorName(route.door) + " " + Math.round(route.meters) + " m" : "";
+    var route = routeFor(walker, walker.inside ? "inside" : "outside");
+    routeText = route ? " | " + doorName(route.main) + " " + Math.round(route.meters) + " m" : "";
   }
   mapUi.info.textContent = problem ? "" : mapData.moon + (maps.length > 1 ? " | Outside and inside" : " | " + (maps[0] === "inside" ? "Inside the facility" : "Outside") + (mapMode === "auto" ? " (following " + followName + ")" : "")) + routeText;
 
@@ -1738,7 +1840,7 @@ function drawMapPanel(panel, which, problem, both) {
   // The way out (inside) or in (outside): a dashed line along the floor to the nearest door on this side.
   var walker = mapRoute ? routePlayer(players) : null;
   if (walker && !!walker.inside === inside) {
-    var route = pathToDoor(which, walker.pos);
+    var route = routeFor(walker, which);
     if (route && route.points.length > 1) {
       ctx.save();
       ctx.beginPath();
@@ -1750,7 +1852,7 @@ function drawMapPanel(panel, which, problem, both) {
       ctx.stroke();
       ctx.setLineDash([7, 5]);
       ctx.lineWidth = 2.5;
-      ctx.strokeStyle = "#5ad1ff";
+      ctx.strokeStyle = route.main ? ROUTE_MAIN : ROUTE_FIRE;
       ctx.stroke();
       ctx.restore();
     }
